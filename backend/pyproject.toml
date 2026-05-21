@@ -1,0 +1,9 @@
+[tool.pyrefly]
+ignore_missing_imports = true
+
+[tool.pyright]
+pythonVersion = "3.11"
+reportMissingImports = "none"
+reportMissingModuleSource = "none"
+reportUnusedImport = "none"
+reportUnusedParameter = "none"
