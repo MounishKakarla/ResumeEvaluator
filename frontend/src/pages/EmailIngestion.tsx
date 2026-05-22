@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getImapConfig, getInboundEmails, getImapSettings, saveImapSettings, testImapConnection, getGraphSettings, saveGraphSettings, testGraphConnection, getIngestionMethod, setIngestionMethod, triggerGraphFetch, deleteInboundEmail, clearInboundEmails, retryInboundEmail } from '../api/client'
+import { getImapConfig, getInboundEmails, getImapSettings, saveImapSettings, testImapConnection, getGraphSettings, saveGraphSettings, testGraphConnection, getIngestionMethod, setIngestionMethod, triggerGraphFetch, stopGraphFetch, triggerImapFetch, stopImapFetch, deleteInboundEmail, clearInboundEmails, retryInboundEmail } from '../api/client'
 import type { InboundEmailItem, IngestionMethod } from '../api/client'
 import { useAppStore } from '../store/useAppStore'
 
@@ -41,6 +41,9 @@ export default function EmailIngestion() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string; error?: string } | null>(null)
   const [testing, setTesting] = useState(false)
+  const [imapFetching, setImapFetching] = useState(false)
+  const [imapFetchMsg, setImapFetchMsg] = useState<string | null>(null)
+  const [imapStopMsg, setImapStopMsg] = useState<string | null>(null)
 
   const { data: imapSettings } = useQuery({
     queryKey: ['imapSettings'],
@@ -97,6 +100,38 @@ export default function EmailIngestion() {
     }
   }
 
+  async function handleImapFetchNow() {
+    setImapFetching(true)
+    setImapFetchMsg(null)
+    setImapStopMsg(null)
+    try {
+      const res = await triggerImapFetch()
+      setImapFetchMsg(res.message)
+      setTimeout(() => {
+        setImapFetchMsg(null)
+        queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
+        queryClient.invalidateQueries({ queryKey: ['imapConfig'] })
+      }, 5000)
+    } catch {
+      setImapFetchMsg('Fetch trigger failed. Check server logs.')
+      setTimeout(() => setImapFetchMsg(null), 3000)
+    } finally {
+      setImapFetching(false)
+    }
+  }
+
+  async function handleImapStopFetch() {
+    try {
+      const res = await stopImapFetch()
+      setImapStopMsg(res.message)
+      setImapFetchMsg(null)
+      setTimeout(() => setImapStopMsg(null), 5000)
+    } catch {
+      setImapStopMsg('Stop signal failed. Check server logs.')
+      setTimeout(() => setImapStopMsg(null), 3000)
+    }
+  }
+
   // Graph API settings state
   const [graphClientId, setGraphClientId] = useState('')
   const [graphTenantId, setGraphTenantId] = useState('')
@@ -112,6 +147,7 @@ export default function EmailIngestion() {
   const [graphTesting, setGraphTesting] = useState(false)
   const [graphFetchMsg, setGraphFetchMsg] = useState<string | null>(null)
   const [graphFetching, setGraphFetching] = useState(false)
+  const [stopMsg, setStopMsg] = useState<string | null>(null)
 
   const { data: graphSettings } = useQuery({
     queryKey: ['graphSettings'],
@@ -185,6 +221,7 @@ export default function EmailIngestion() {
   async function handleFetchNow() {
     setGraphFetching(true)
     setGraphFetchMsg(null)
+    setStopMsg(null)
     try {
       const res = await triggerGraphFetch(graphFromDate || undefined, graphToDate || undefined)
       setGraphFetchMsg(res.message)
@@ -198,6 +235,18 @@ export default function EmailIngestion() {
       setTimeout(() => setGraphFetchMsg(null), 3000)
     } finally {
       setGraphFetching(false)
+    }
+  }
+
+  async function handleStopFetch() {
+    try {
+      const res = await stopGraphFetch()
+      setStopMsg(res.message)
+      setGraphFetchMsg(null)
+      setTimeout(() => setStopMsg(null), 5000)
+    } catch {
+      setStopMsg('Stop signal failed. Check server logs.')
+      setTimeout(() => setStopMsg(null), 3000)
     }
   }
 
@@ -392,9 +441,30 @@ export default function EmailIngestion() {
             >
               {testing ? 'Testing…' : 'Test Connection'}
             </button>
+            <button
+              onClick={handleImapFetchNow}
+              disabled={imapFetching || !imapSettings?.configured}
+              className="border border-[#1D9E75] text-[#1D9E75] hover:bg-[#E1F5EE] dark:hover:bg-[#0a2e22] disabled:opacity-50 font-semibold rounded-lg px-4 py-2 text-sm transition-colors"
+            >
+              {imapFetching ? 'Triggering…' : 'Fetch Now'}
+            </button>
+            {imapSettings?.configured && (
+              <button
+                onClick={handleImapStopFetch}
+                className="border border-[#E24B4A] text-[#E24B4A] hover:bg-[#FCEBEB] dark:hover:bg-red-950/30 font-semibold rounded-lg px-4 py-2 text-sm transition-colors flex items-center gap-1.5"
+                title="Stop the current IMAP fetch cycle"
+              >
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <rect x="6" y="6" width="12" height="12" rx="1" />
+                </svg>
+                Stop Fetch
+              </button>
+            )}
             {saveMsg && (
               <span className="text-xs text-[#1D9E75] font-medium">{saveMsg}</span>
             )}
+            {imapFetchMsg && <span className="text-xs text-[#1D9E75] font-medium">{imapFetchMsg}</span>}
+            {imapStopMsg && <span className="text-xs text-[#E24B4A] font-medium">{imapStopMsg}</span>}
             {testResult && (
               <span className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${
                 testResult.ok
@@ -537,8 +607,21 @@ export default function EmailIngestion() {
             >
               {graphFetching ? 'Triggering…' : 'Fetch Now'}
             </button>
+            {graphSettings?.configured && (
+              <button
+                onClick={handleStopFetch}
+                className="border border-[#E24B4A] text-[#E24B4A] hover:bg-[#FCEBEB] dark:hover:bg-red-950/30 font-semibold rounded-lg px-4 py-2 text-sm transition-colors flex items-center gap-1.5"
+                title="Stop the current email fetch cycle (manual or automatic)"
+              >
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <rect x="6" y="6" width="12" height="12" rx="1" />
+                </svg>
+                Stop Fetch
+              </button>
+            )}
             {graphSaveMsg && <span className="text-xs text-[#1D9E75] font-medium">{graphSaveMsg}</span>}
             {graphFetchMsg && <span className="text-xs text-[#1D9E75] font-medium">{graphFetchMsg}</span>}
+            {stopMsg && <span className="text-xs text-[#E24B4A] font-medium">{stopMsg}</span>}
             {graphTestResult && (
               <span className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${
                 graphTestResult.ok

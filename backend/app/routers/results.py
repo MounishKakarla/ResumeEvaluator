@@ -497,6 +497,7 @@ def send_rejection_email(
             job_role_title=ev.job_role.title if ev.job_role else "the role",
             skill_gaps=skill_gaps[:5],
             note=body.note,
+            filter_reason=getattr(ev, "eval_status", None),
         )
         if not sent:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

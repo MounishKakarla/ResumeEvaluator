@@ -280,7 +280,11 @@ def _build_password_reset_html(name: str, email: str, password: str) -> str:
 # Shortlist / next-steps email (candidate)
 # ---------------------------------------------------------------------------
 
-def _build_shortlist_html(candidate_name: str, job_title: str) -> str:
+def _build_shortlist_html(
+    candidate_name: str,
+    job_title: str,
+    matched_skills: list | None = None,
+) -> str:
     header = _BRAND_HEADER.replace("__SUBTITLE__", "Recruitment Team")
 
     def stage(num: str, icon: str, title: str, desc: str, active: bool) -> str:
@@ -354,10 +358,30 @@ def _build_shortlist_html(candidate_name: str, job_title: str) -> str:
       <strong>"""
         + escape(job_title)
         + """</strong> position has been shortlisted.
-      Your profile stood out among many strong candidates, and we'd love to move forward with you.
-    </p>
+      Your background and technical skills are a strong match for what we're looking for,
+      and our team would love to move forward with you.
+    </p>"""
+        + (
+            f"""
+    <table width="100%" cellpadding="0" cellspacing="0"
+      style="background-color:#f8f9fc;border:1px solid #e0e4ed;border-radius:6px;margin:16px 0;">
+      <tr><td style="padding:14px 20px;">
+        <p style="margin:0 0 10px 0;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.8px;">
+          Why we're moving forward
+        </p>
+        <p style="margin:0;font-size:13px;color:#555;line-height:1.7;">
+          Your expertise in
+          <strong>{", ".join(escape(s) for s in matched_skills[:5])}</strong>
+          {"and other relevant areas " if len(matched_skills) > 5 else ""}aligns well with the
+          technical requirements of this role.
+        </p>
+      </td></tr>
+    </table>"""
+            if matched_skills else ""
+        )
+        + """
     <p style="font-size:14px;color:#555;line-height:1.7;margin-bottom:6px;">
-      Here's a overview of our hiring process:
+      Here's an overview of our hiring process:
     </p>
 
     <table width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;">"""
@@ -494,7 +518,7 @@ def send_automated_email(candidate_email: str, candidate_name: str, job_role_tit
         "Our recruitment team will be in touch within 2–3 business days with further details.\n\n"
         "Best regards,\nTekTalentScan Recruitment Team"
     )
-    _send_email(candidate_email, subject, plain, _build_shortlist_html(candidate_name, job_role_title))
+    _send_email(candidate_email, subject, plain, _build_shortlist_html(candidate_name, job_role_title, matched_skills=None))
 
 
 def send_manual_email(candidate_email: str, _candidate_name: str, subject: str, body: str) -> None:
@@ -507,8 +531,28 @@ def _build_rejection_html(
     job_title: str,
     skill_gaps: list,
     note: str | None,
+    filter_reason: str | None = None,
 ) -> str:
     header = _BRAND_HEADER.replace("__SUBTITLE__", "Application Update")
+
+    # Human-readable reason — no scores, no numbers
+    if filter_reason == "experience_filtered":
+        reason_text = (
+            "This role requires a specific level of professional experience that we were "
+            "unable to identify in your application at this time."
+        )
+    elif filter_reason == "tfidf_filtered":
+        reason_text = (
+            "After reviewing your profile, we found that the technical skill set required for this "
+            "role was not sufficiently demonstrated in your application."
+        )
+    else:
+        reason_text = (
+            "After carefully reviewing your application alongside many strong candidates, "
+            "we have decided to move forward with profiles that more closely match the specific "
+            "needs of this role at this time."
+        )
+
     gap_rows = ""
     if skill_gaps:
         items = "".join(
@@ -520,7 +564,7 @@ def _build_rejection_html(
     style="background-color:#f8f9fc;border:1px solid #e0e4ed;border-radius:6px;margin:20px 0;">
     <tr><td style="padding:16px 20px;">
       <p style="margin:0 0 10px 0;font-size:13px;color:#888;text-transform:uppercase;letter-spacing:0.8px;">
-        Areas to Strengthen
+        Skills to Strengthen for Future Applications
       </p>
       <table cellpadding="0" cellspacing="0">{items}</table>
     </td></tr>
@@ -543,15 +587,16 @@ def _build_rejection_html(
         + escape(job_title)
         + """</strong> position and for the time you invested in our process.
     </p>
-    <p style="font-size:14px;color:#555;line-height:1.7;">
-      After careful consideration, we have decided to move forward with other candidates
-      whose profiles more closely match our current requirements.
+    <p style="font-size:14px;color:#555;line-height:1.7;">"""
+        + reason_text
+        + """
     </p>"""
         + gap_rows
         + note_block
         + """
-    <p style="font-size:14px;color:#555;line-height:1.7;margin-top:16px;">
-      We truly appreciate your time and encourage you to apply for future opportunities that match your skills.
+    <p style="font-size:14px;color:#555;line-height:1.7;margin-top:20px;">
+      We genuinely appreciate the time you invested and encourage you to keep an eye on future
+      openings that match your growing skill set. We wish you all the best in your job search.
     </p>
     <p style="font-size:14px;color:#444;margin-top:28px;">
       Best regards,<br><strong style="color:#534AB7;">TekTalentScan Recruitment Team</strong>
@@ -593,12 +638,22 @@ class CandidateEmailService:
         job_role_title: str,
         db=None,
         tracking_pixel_url: str | None = None,
+        matched_skills: list | None = None,
+        # score param kept for backwards-compat but intentionally unused in candidate-facing content
+        score: float | None = None,
     ) -> bool:
         """Send the shortlist / hiring-process next-steps email to a candidate."""
         subject = f"Your Application for {job_role_title} — Next Steps"
+        skills_line = (
+            f"\n\nWe were particularly impressed by your background in "
+            f"{', '.join(matched_skills[:5])}{'and more' if len(matched_skills) > 5 else ''},"
+            " which aligns well with the requirements of this role."
+            if matched_skills else ""
+        )
         plain = (
             f"Hi {candidate_name},\n\n"
-            f"Congratulations! Your application for {job_role_title} has been shortlisted.\n\n"
+            f"Congratulations! We have reviewed your application for the {job_role_title} position "
+            f"and are pleased to inform you that your profile has been shortlisted.{skills_line}\n\n"
             "Our hiring process consists of three stages:\n"
             "  1. Coding Assessment (~60–90 min online challenge)\n"
             "  2. Technical Interview (live session with the engineering team)\n"
@@ -611,7 +666,7 @@ class CandidateEmailService:
             subject, plain = override
         return _send_email(
             candidate_email, subject, plain,
-            _build_shortlist_html(candidate_name, job_role_title),
+            _build_shortlist_html(candidate_name, job_role_title, matched_skills=matched_skills),
             tracking_pixel_url=tracking_pixel_url,
         )
 
@@ -675,29 +730,53 @@ class CandidateEmailService:
         skill_gaps: list | None = None,
         note: str | None = None,
         db=None,
+        filter_reason: str | None = None,
+        # score/min_score kept for backwards-compat but not surfaced to candidates
+        score: float | None = None,
+        min_score: float | None = None,
     ) -> bool:
-        """Send a constructive rejection email with optional skill gap feedback."""
+        """Send a professional rejection email with human-readable reason and optional skill feedback."""
         subject = f"Your Application for {job_role_title} — Update"
+
+        if filter_reason == "experience_filtered":
+            reason_line = (
+                "This role requires a specific level of professional experience that we were "
+                "unable to identify in your application at this time."
+            )
+        elif filter_reason == "tfidf_filtered":
+            reason_line = (
+                "After reviewing your profile, we found that the technical skill set required "
+                "for this role was not sufficiently demonstrated in your application."
+            )
+        else:
+            reason_line = (
+                "After carefully reviewing your application alongside many strong candidates, "
+                "we have decided to move forward with profiles that more closely match the "
+                "specific needs of this role at this time."
+            )
+
         gap_section = ""
         if skill_gaps:
             gap_list = "\n".join(f"  • {g}" for g in skill_gaps)
             gap_section = (
-                "\n\nTo help you grow, here are areas where strengthening your skills "
-                f"could improve future applications for similar roles:\n{gap_list}\n"
+                "\n\nTo support your growth, here are skills that would strengthen future applications "
+                "for similar roles:\n" + gap_list + "\n"
             )
         note_section = f"\n{note}\n" if note else ""
         plain = (
             f"Hi {candidate_name},\n\n"
-            f"Thank you for your interest in the {job_role_title} position and for taking the time "
-            "to go through our process.\n\n"
-            "After careful consideration, we have decided to move forward with other candidates "
-            "whose profiles more closely match our current requirements."
+            f"Thank you for your interest in the {job_role_title} position and for the time "
+            "you invested in the process.\n\n"
+            + reason_line
             + gap_section
             + note_section
-            + "\n\nWe appreciate your time and encourage you to apply for future opportunities.\n\n"
+            + "\n\nWe genuinely appreciate your effort and encourage you to apply for future "
+            "opportunities that match your growing skill set. We wish you all the best.\n\n"
             "Best regards,\nTekTalentScan Recruitment Team"
         )
-        html = _build_rejection_html(candidate_name, job_role_title, skill_gaps or [], note)
+        html = _build_rejection_html(
+            candidate_name, job_role_title, skill_gaps or [], note, filter_reason=filter_reason,
+        )
         override = cls._resolve_template(db, "rejection", candidate_name, job_role_title)
         if override:
             subject, plain = override

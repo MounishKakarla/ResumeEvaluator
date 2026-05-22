@@ -229,9 +229,25 @@ def _process_resume(
         if not getattr(candidate, 'current_title', None):
             candidate.current_title = llm_meta.get("title") or extract_current_title(sections)
         # Always update experience_level so re-uploads correct mis-classifications
-        candidate.experience_level = llm_meta.get("experience_level") or infer_experience_level(parsed.text)
+        _yrs_raw = llm_meta.get("years_experience") or extract_years_experience(sections)
+        _yrs = float(_yrs_raw) if _yrs_raw is not None else None
+        # Classify by years_experience (primary signal); keyword inference as fallback
+        if _yrs is not None:
+            if _yrs < 1:
+                exp_level = "entry"
+            elif _yrs < 3:
+                exp_level = "junior"
+            elif _yrs < 5:
+                exp_level = "mid"
+            elif _yrs < 10:
+                exp_level = "senior"
+            else:
+                exp_level = "executive"
+        else:
+            exp_level = llm_meta.get("experience_level") or infer_experience_level(parsed.text)
+        candidate.experience_level = exp_level
         if getattr(candidate, 'years_experience', None) is None:
-            candidate.years_experience = llm_meta.get("years_experience") or extract_years_experience(sections)
+            candidate.years_experience = _yrs
         if getattr(candidate, 'graduation_year', None) is None:
             candidate.graduation_year = llm_meta.get("graduation_year") or extract_graduation_year(sections, raw_text=parsed.text)
     except (AttributeError, TypeError) as exc:

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_password_hash
 from app.deps import get_current_user, get_db
-from app.models import EmailTemplate, User
+from app.models import Candidate, EmailTemplate, User
 from app.schemas import EmailTemplateOut, EmailTemplateUpdate
 from app.services.email import send_password_reset_email, send_welcome_email
 
@@ -459,6 +459,7 @@ def trigger_graph_fetch(
         _acquire_token,
         _get_messages_with_attachments,
         _process_graph_message_with_retry,
+        _stop_event,
     )
 
     # Capture body values before thread starts (avoid closure over mutable state)
@@ -466,6 +467,7 @@ def trigger_graph_fetch(
     body_to = req.to_date if req else ""
 
     def _run() -> None:
+        _stop_event.clear()
         cfg = _get_graph_config(SessionLocal)
         if not cfg:
             return
@@ -480,6 +482,10 @@ def trigger_graph_fetch(
                 to_date=to_date,
             )
             for msg in messages:
+                if _stop_event.is_set():
+                    import logging as _logging
+                    _logging.getLogger(__name__).info("Manual Graph fetch stopped by user request.")
+                    break
                 _process_graph_message_with_retry(
                     msg, token, cfg["mailbox"], _settings.upload_dir, SessionLocal,
                     subject_keywords=cfg["subject_keywords"],
@@ -490,6 +496,73 @@ def trigger_graph_fetch(
 
     threading.Thread(target=_run, daemon=True, name="graph-manual-trigger").start()
     return {"message": "Graph email fetch triggered in background. Check the email log in a moment."}
+
+
+@router.post("/stop-graph-fetch")
+def stop_graph_fetch(current_user: User = Depends(get_current_user)) -> dict:
+    """Signal the currently running Graph fetch (manual or periodic) to stop after the current message."""
+    _require_admin(current_user)
+    from app.services.graph_ingestion import _stop_event
+    _stop_event.set()
+    return {"message": "Stop signal sent. The fetch will halt after the current email is processed."}
+
+
+@router.post("/trigger-imap-fetch")
+def trigger_imap_fetch(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Trigger an immediate one-shot IMAP fetch in the background."""
+    _require_admin(current_user)
+    import threading
+    from app.config import settings as _settings
+    from app.database import SessionLocal
+    from app.services.email_ingestion import (
+        _get_imap_config,
+        _connect_imap,
+        _fetch_unseen_message_ids,
+        _fetch_message,
+        _process_message_with_retry,
+        _stop_event as _imap_stop_event,
+    )
+
+    def _run() -> None:
+        _imap_stop_event.clear()
+        cfg = _get_imap_config(SessionLocal)
+        if not cfg:
+            return
+        try:
+            conn = _connect_imap(
+                cfg["host"], cfg["port"], cfg["username"], cfg["password"], cfg["use_ssl"]
+            )
+            msg_ids = _fetch_unseen_message_ids(
+                conn, folder=cfg["folder"], subject_keywords=cfg["subject_keywords"]
+            )
+            for mid in msg_ids:
+                if _imap_stop_event.is_set():
+                    import logging as _logging
+                    _logging.getLogger(__name__).info("Manual IMAP fetch stopped by user request.")
+                    break
+                msg = _fetch_message(conn, mid)
+                if msg:
+                    _process_message_with_retry(msg, _settings.upload_dir, SessionLocal)
+                mid_str = mid.decode("ascii") if isinstance(mid, bytes) else mid
+                conn.store(mid_str, "+FLAGS", "\\Seen")
+            conn.logout()
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).error("Manual IMAP trigger error: %s", exc)
+
+    threading.Thread(target=_run, daemon=True, name="imap-manual-trigger").start()
+    return {"message": "IMAP fetch triggered in background. Check the email log in a moment."}
+
+
+@router.post("/stop-imap-fetch")
+def stop_imap_fetch(current_user: User = Depends(get_current_user)) -> dict:
+    """Signal the currently running IMAP fetch (manual or periodic) to stop after the current message."""
+    _require_admin(current_user)
+    from app.services.email_ingestion import _stop_event as _imap_stop_event
+    _imap_stop_event.set()
+    return {"message": "Stop signal sent. The IMAP fetch will halt after the current email is processed."}
 
 
 @router.post("/test-graph")
@@ -727,3 +800,41 @@ async def extract_jd_text(
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+@router.post("/reclassify-experience-levels")
+def reclassify_experience_levels(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Reclassify all candidates experience_level using years_experience ranges.
+
+    entry  = 0–1 yr | junior = 1–3 yrs | mid = 3–5 yrs | senior = 5–10 yrs | executive = 10+ yrs
+    Candidates with no years_experience are reclassified via keyword inference on stored title.
+    """
+    from app.services.parser import infer_experience_level
+
+    def _level_from_years(yrs: float) -> str:
+        if yrs < 1:
+            return "entry"
+        if yrs < 3:
+            return "junior"
+        if yrs < 5:
+            return "mid"
+        if yrs < 10:
+            return "senior"
+        return "executive"
+
+    candidates = db.query(Candidate).all()
+    updated = 0
+    for c in candidates:
+        if c.years_experience is not None:
+            new_level = _level_from_years(float(c.years_experience))
+        else:
+            # Fallback: infer from current title text only
+            new_level = infer_experience_level(c.current_title or "")
+        if c.experience_level != new_level:
+            c.experience_level = new_level
+            updated += 1
+    db.commit()
+    return {"updated": updated, "total": len(candidates)}

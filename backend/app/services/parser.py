@@ -31,9 +31,13 @@ _SENIOR_RE = re.compile(
     r'\b(senior|sr\.?\s|lead|principal|staff\s+\w+|architect|director|manager)\b',
     re.I,
 )
-_JUNIOR_RE = re.compile(
-    r'\b(junior|jr\.?\s|entry[\s\-]level|intern\b|trainee|fresher|fresh\s+graduate|recent\s+graduate|'
+_ENTRY_RE = re.compile(
+    r'\b(intern\b|internship|trainee|fresher|fresh\s+graduate|recent\s+graduate|'
     r'graduate\s+engineer|engineering\s+student|b\.?tech\s+student|final\s+year|passout|pass\s*out)\b',
+    re.I,
+)
+_JUNIOR_RE = re.compile(
+    r'\b(junior|jr\.?\s|entry[\s\-]level)\b',
     re.I,
 )
 _TITLE_WORDS = {
@@ -264,20 +268,21 @@ def extract_graduation_year(sections: "List[Any]", raw_text: str = "") -> Option
 
 
 def infer_experience_level(text: str) -> str:
-    """Return 'junior' | 'mid' | 'senior' | 'executive' from resume text keywords.
+    """Keyword-only fallback when years_experience cannot be extracted.
 
-    Junior/fresher patterns are checked FIRST so interns and fresh graduates are
-    not mis-classified as senior/executive because of phrases like 'led a project'
-    or 'head of college club' in their resumes.
+    entry=interns/freshers, junior=jr. titles, senior/executive by title keywords.
+    Defaults to 'entry' when nothing matches.
     """
-    sample = text[:4000]
+    sample = text[:6000]
+    if _ENTRY_RE.search(sample):
+        return "entry"
     if _JUNIOR_RE.search(sample):
         return "junior"
     if _EXEC_RE.search(sample):
         return "executive"
     if _SENIOR_RE.search(sample):
         return "senior"
-    return "mid"
+    return "entry"
 
 
 def extract_current_title(sections: "List[Any]") -> Optional[str]:
@@ -703,7 +708,9 @@ def extract_metadata_via_llm(text: str) -> Optional[dict]:
             '{"name":null,"email":null,"phone":null,"title":null,'
             '"experience_level":null,"years_experience":null,"graduation_year":null,'
             '"linkedin_url":null,"github_url":null,"portfolio_url":null}\n\n'
-            "experience_level must be one of: junior, mid, senior, executive\n"
+            "experience_level must be one of: entry, junior, mid, senior, executive\n"
+            "entry=0-1 yr (interns, fresh grads, trainees). "
+            "junior=1-3 yrs. mid=3-5 yrs. senior=5-10 yrs. executive=10+ yrs or C-level/VP/Director.\n"
             "years_experience is a number (float). graduation_year is a 4-digit integer.\n\n"
             f"Resume:\n{sample}"
         )
@@ -727,7 +734,7 @@ def extract_metadata_via_llm(text: str) -> Optional[dict]:
         data: dict = json.loads(json_match.group())
 
         # Sanitise experience_level
-        valid_levels = {"junior", "mid", "senior", "executive"}
+        valid_levels = {"entry", "junior", "mid", "senior", "executive"}
         if data.get("experience_level") not in valid_levels:
             data["experience_level"] = None
 

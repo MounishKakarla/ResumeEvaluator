@@ -623,7 +623,19 @@ def _run_evaluation(
                 token = uuid.uuid4().hex
                 eval_row_for_email.email_tracking_token = token
                 pixel_url = f"{_settings.backend_url.rstrip('/')}/track/open/{token}" if _settings.backend_url else None
-                sent_ok = CandidateEmailService.send_next_steps(candidate.email, candidate.name, job_role.title, tracking_pixel_url=pixel_url)
+                _matched = []
+                try:
+                    import json as _json
+                    if eval_row_for_email.skills_matched:
+                        _matched = [s["skill_name"] for s in _json.loads(eval_row_for_email.skills_matched)]
+                except Exception:
+                    pass
+                sent_ok = CandidateEmailService.send_next_steps(
+                    candidate.email, candidate.name, job_role.title,
+                    tracking_pixel_url=pixel_url,
+                    score=eval_row_for_email.total_score,
+                    matched_skills=_matched,
+                )
                 if sent_ok:
                     eval_row_for_email.email_sent_at = _utcnow()
                     logger.info("Auto next-steps email sent to %s for job_role_id=%d", candidate.email, job_role_id)
@@ -852,7 +864,19 @@ def send_next_steps_email(
         token = uuid.uuid4().hex
         ev.email_tracking_token = token
         pixel_url = f"{_settings.backend_url.rstrip('/')}/track/open/{token}" if _settings.backend_url else None
-        sent_ok = CandidateEmailService.send_next_steps(candidate.email, candidate.name, ev.job_role.title, db=db, tracking_pixel_url=pixel_url)
+        _matched = []
+        try:
+            import json as _json
+            if ev.skills_matched:
+                _matched = [s["skill_name"] for s in _json.loads(ev.skills_matched)]
+        except Exception:
+            pass
+        sent_ok = CandidateEmailService.send_next_steps(
+            candidate.email, candidate.name, ev.job_role.title,
+            db=db, tracking_pixel_url=pixel_url,
+            score=ev.total_score,
+            matched_skills=_matched,
+        )
         if not sent_ok:
             return {"sent": False, "message": "SMTP is not configured — email not sent"}
         ev.email_sent_at = _utcnow()
@@ -915,7 +939,17 @@ def bulk_send_next_steps(
             skipped += 1
             continue
         try:
-            sent_ok = CandidateEmailService.send_next_steps(candidate.email, candidate.name, ev.job_role.title, db=db)
+            _matched = []
+            try:
+                import json as _json
+                if ev.skills_matched:
+                    _matched = [s["skill_name"] for s in _json.loads(ev.skills_matched)]
+            except Exception:
+                pass
+            sent_ok = CandidateEmailService.send_next_steps(
+                candidate.email, candidate.name, ev.job_role.title,
+                db=db, score=ev.total_score, matched_skills=_matched,
+            )
             if sent_ok:
                 ev.email_sent_at = _utcnow()
                 sent += 1

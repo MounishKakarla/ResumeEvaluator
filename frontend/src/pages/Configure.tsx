@@ -100,6 +100,7 @@ export default function Configure() {
   // ── Experience level filter state ────────────────────────────────────────
   const [filterExpLevels, setFilterExpLevels] = useState<string[]>([])
   const [minGradYear, setMinGradYear] = useState<number | ''>('')
+  const [maxGradYear, setMaxGradYear] = useState<number | ''>('')
 
 
   // ── Skill browser state ─────────────────────────────────────────────────
@@ -204,6 +205,7 @@ export default function Configure() {
     setAutoEmailEnabled(role.auto_email_enabled ?? true)
     setFilterExpLevels(role.filter_experience_levels ?? [])
     setMinGradYear(role.min_graduation_year ?? '')
+    setMaxGradYear(role.max_graduation_year ?? '')
     setTimeout(() => { isLoadingRoleRef.current = false }, 0)
   }
 
@@ -237,6 +239,7 @@ export default function Configure() {
         filter_experience_levels: filterExpLevels,
         auto_email_enabled: autoEmailEnabled,
         min_graduation_year: minGradYear !== '' ? Number(minGradYear) : null,
+        max_graduation_year: maxGradYear !== '' ? Number(maxGradYear) : null,
       }
       if (selectedJobRoleId) return updateJobRole(selectedJobRoleId, payload)
       return createJobRole(payload)
@@ -309,6 +312,7 @@ export default function Configure() {
       setTfidfThreshold(0)
       setFilterExpLevels([])
       setMinGradYear('')
+      setMaxGradYear('')
       setIntakePaused(false)
       setAutoEmailEnabled(true)
       setRequirements([])
@@ -398,6 +402,7 @@ export default function Configure() {
                   setTfidfThreshold(0)
                   setFilterExpLevels([])
                   setMinGradYear('')
+                  setMaxGradYear('')
                   setIntakePaused(false)
                   setRequirements([])
                 }}
@@ -576,36 +581,52 @@ export default function Configure() {
             </div>
           </div>
 
-          {/* Graduation Year Filter */}
+          {/* Graduation Year Range Filter */}
           <div className="mt-4">
-            <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">
-              Min. Graduation Year
-              <span className="ml-1 font-normal text-gray-400">(freshers only — resumes with an earlier pass-out year are filtered before evaluation)</span>
+            <label className="text-xs text-gray-500 dark:text-gray-400 mb-2 block">
+              Graduation Year Range
+              <span className="ml-1 font-normal text-gray-400">(resumes outside this range are filtered before evaluation — leave blank for no restriction)</span>
             </label>
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                min={1980}
-                max={2040}
-                step={1}
-                className={`${inputCls} w-32`}
-                placeholder="e.g. 2022"
-                value={minGradYear}
-                onChange={(e) => setMinGradYear(e.target.value ? Number(e.target.value) : '')}
-              />
-              {minGradYear !== '' && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">From</span>
+                <input
+                  type="number"
+                  min={1980}
+                  max={2040}
+                  step={1}
+                  className={`${inputCls} w-28`}
+                  placeholder="e.g. 2025"
+                  value={minGradYear}
+                  onChange={(e) => setMinGradYear(e.target.value ? Number(e.target.value) : '')}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">To</span>
+                <input
+                  type="number"
+                  min={1980}
+                  max={2040}
+                  step={1}
+                  className={`${inputCls} w-28`}
+                  placeholder="e.g. 2026"
+                  value={maxGradYear}
+                  onChange={(e) => setMaxGradYear(e.target.value ? Number(e.target.value) : '')}
+                />
+              </div>
+              {(minGradYear !== '' || maxGradYear !== '') && (
                 <button
                   type="button"
-                  onClick={() => setMinGradYear('')}
+                  onClick={() => { setMinGradYear(''); setMaxGradYear('') }}
                   className="text-xs text-gray-400 hover:text-red-500 transition-colors"
                 >
                   Clear
                 </button>
               )}
-              <span className="text-xs text-gray-400 dark:text-gray-500">
-                Leave blank to accept all graduation years.
-              </span>
             </div>
+            {minGradYear !== '' && maxGradYear !== '' && Number(minGradYear) > Number(maxGradYear) && (
+              <p className="text-xs text-[#E24B4A] mt-1">From year must be ≤ To year.</p>
+            )}
           </div>
 
           {/* Auto-Pause Settings */}

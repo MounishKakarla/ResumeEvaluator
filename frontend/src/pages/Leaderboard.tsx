@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { getResults, deleteResult, deleteAllResults, getJobRoles, setIntakePause, autoApplyShortlist, bulkShortlist, bulkDelete, sendNextStepsEmail, updateCandidateStage, bulkSendNextSteps, downloadResultsCsv } from '../api/client'
+import { getResults, deleteResult, deleteAllResults, getJobRoles, setIntakePause, autoApplyShortlist, bulkShortlist, bulkDelete, sendNextStepsEmail, updateCandidateStage, bulkSendNextSteps, downloadResultsCsv, reclassifyExperienceLevels } from '../api/client'
 import type { CandidateResult, CandidateStage, JobRole, ShortlistStatus } from '../api/client'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
@@ -118,19 +118,15 @@ export default function Leaderboard() {
 
   const [sortKey, setSortKey] = useState<SortKey>(_ss.sortKey ?? 'total_score')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_ss.sortDir ?? 'desc')
-  const [statusFilter, setStatusFilter] = useState(_ss.statusFilter ?? '')
-  const [expFilter, setExpFilter] = useState(_ss.expFilter ?? '')
-  const [yrsFilter, setYrsFilter] = useState(_ss.yrsFilter ?? '')
-  const [gradYearFilter, setGradYearFilter] = useState(_ss.gradYearFilter ?? '')
-  const [showFilter, setShowFilter] = useState(false)
   const [groupByExp, setGroupByExp] = useState(_ss.groupByExp ?? true)
+  const [page, setPage] = useState<number>(_ss.page ?? 1)
   const [blindMode, setBlindMode] = useState(() => {
     try { return localStorage.getItem('lb-blind-mode') === 'true' } catch { return false }
   })
 
   useEffect(() => {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ sortKey, sortDir, statusFilter, expFilter, yrsFilter, gradYearFilter, groupByExp }))
-  }, [sortKey, sortDir, statusFilter, expFilter, yrsFilter, gradYearFilter, groupByExp])
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ sortKey, sortDir, groupByExp, page }))
+  }, [sortKey, sortDir, groupByExp, page])
 
   const toggleBlindMode = () => {
     setBlindMode((v: boolean) => {
@@ -150,48 +146,27 @@ export default function Leaderboard() {
     return `${local.slice(0, 2)}***@***.***`
   }
 
-  // ── Saved filter presets (localStorage) ────────────────────────────────
-  const PRESETS_KEY = 'lb-filter-presets'
-  interface FilterPreset { name: string; statusFilter: string; expFilter: string; yrsFilter: string; groupByExp: boolean; sortKey: string; sortDir: string }
-  const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() => {
-    try { return JSON.parse(localStorage.getItem(PRESETS_KEY) ?? '[]') } catch { return [] }
-  })
-  const [presetName, setPresetName] = useState('')
-  const saveFilterPreset = () => {
-    if (!presetName.trim()) return
-    const preset: FilterPreset = { name: presetName.trim(), statusFilter, expFilter, yrsFilter, groupByExp, sortKey, sortDir }
-    const updated = [...filterPresets.filter((p) => p.name !== preset.name), preset]
-    setFilterPresets(updated)
-    localStorage.setItem(PRESETS_KEY, JSON.stringify(updated))
-    setPresetName('')
-  }
-  const applyFilterPreset = (preset: FilterPreset) => {
-    setStatusFilter(preset.statusFilter)
-    setExpFilter(preset.expFilter)
-    setYrsFilter(preset.yrsFilter)
-    setGroupByExp(preset.groupByExp)
-    setSortKey(preset.sortKey as SortKey)
-    setSortDir(preset.sortDir as 'asc' | 'desc')
-  }
-  const deleteFilterPreset = (name: string) => {
-    const updated = filterPresets.filter((p) => p.name !== name)
-    setFilterPresets(updated)
-    localStorage.setItem(PRESETS_KEY, JSON.stringify(updated))
-  }
+  const [nameSearch, setNameSearch] = useState('')
+  const [gradYearFrom, setGradYearFrom] = useState<number | ''>('')
+  const [gradYearTo, setGradYearTo] = useState<number | ''>('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [filterLevel, setFilterLevel] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
-  const [page, setPage] = useState(1)
   const PAGE_SIZE = 50
 
-  useEffect(() => { setPage(1) }, [selectedJobRoleId, statusFilter, expFilter, yrsFilter, gradYearFilter])
+  const _isFirstMount = useRef(true)
+  useEffect(() => {
+    if (_isFirstMount.current) { _isFirstMount.current = false; return }
+    setPage(1)
+  }, [selectedJobRoleId])
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['results', selectedJobRoleId, statusFilter, page],
+    queryKey: ['results', selectedJobRoleId, page],
     queryFn: () =>
       getResults({
         job_role_id: selectedJobRoleId ?? undefined,
         sort: 'total_score',
         order: 'desc',
-        status: (statusFilter && statusFilter !== 'needs_review') ? statusFilter : undefined,
         limit: PAGE_SIZE,
         page,
       }),
@@ -272,6 +247,17 @@ export default function Leaderboard() {
     },
   })
 
+  const [reclassifyMsg, setReclassifyMsg] = useState<string | null>(null)
+  const reclassifyMut = useMutation({
+    mutationFn: reclassifyExperienceLevels,
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['results'] })
+      setReclassifyMsg(`Reclassified ${res.updated} of ${res.total} candidates`)
+      setTimeout(() => setReclassifyMsg(null), 5000)
+    },
+    onError: () => { setReclassifyMsg('Reclassification failed'); setTimeout(() => setReclassifyMsg(null), 4000) },
+  })
+
   const STAGE_COLORS: Record<CandidateStage, string> = {
     applied:   'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600',
     screening: 'bg-[#EEEDFE] dark:bg-[#2d2a5a] text-[#3C3489] dark:text-[#AFA9EC] border-[#AFA9EC]',
@@ -347,23 +333,32 @@ export default function Leaderboard() {
 
   const rawItems = data?.items ?? []
   const baseItems = useMemo(() => {
-    let arr = statusFilter === 'needs_review'
-      ? rawItems.filter((r) => r.needs_manual_review)
-      : rawItems
-    if (expFilter) arr = arr.filter((r) => (r.candidate_experience_level ?? 'mid') === expFilter)
-    if (yrsFilter) {
-      const minYrs = Number(yrsFilter)
-      arr = arr.filter((r) => (r.candidate_years_experience ?? 0) >= minYrs)
-    }
-    if (gradYearFilter) {
-      const minGrad = Number(gradYearFilter)
-      arr = arr.filter((r) => r.candidate_graduation_year != null && r.candidate_graduation_year >= minGrad)
-    }
+    let arr = rawItems
     if (scoreRangeFilter) {
       arr = arr.filter((r) => r.total_score >= scoreRangeFilter.min && r.total_score < scoreRangeFilter.max + 10)
     }
+    if (nameSearch.trim()) {
+      const q = nameSearch.toLowerCase().trim()
+      arr = arr.filter(
+        (r) =>
+          r.candidate_name.toLowerCase().includes(q) ||
+          (r.candidate_email ?? '').toLowerCase().includes(q)
+      )
+    }
+    if (gradYearFrom !== '') {
+      arr = arr.filter((r) => r.candidate_graduation_year != null && r.candidate_graduation_year >= Number(gradYearFrom))
+    }
+    if (gradYearTo !== '') {
+      arr = arr.filter((r) => r.candidate_graduation_year != null && r.candidate_graduation_year <= Number(gradYearTo))
+    }
+    if (filterStatus) {
+      arr = arr.filter((r) => r.status === filterStatus)
+    }
+    if (filterLevel) {
+      arr = arr.filter((r) => (r.candidate_experience_level ?? 'entry') === filterLevel)
+    }
     return arr
-  }, [rawItems, statusFilter, expFilter, yrsFilter, gradYearFilter, scoreRangeFilter])
+  }, [rawItems, scoreRangeFilter, nameSearch, gradYearFrom, gradYearTo, filterStatus, filterLevel])
 
   // Client-side sort so all columns work without backend support
   const items = useMemo(() => {
@@ -475,6 +470,79 @@ export default function Leaderboard() {
 
       {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap">
+        {/* Search */}
+        <div className="relative">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={nameSearch}
+            onChange={(e) => { setNameSearch(e.target.value); setPage(1) }}
+            placeholder="Search name or email…"
+            className="pl-9 pr-7 py-2 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 w-52 placeholder-gray-400 dark:placeholder-gray-500"
+          />
+          {nameSearch && (
+            <button
+              onClick={() => setNameSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-base leading-none"
+            >×</button>
+          )}
+        </div>
+
+        {/* Graduation Year Range Filter */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Grad Year</span>
+          <input
+            type="number"
+            value={gradYearFrom}
+            onChange={(e) => { setGradYearFrom(e.target.value ? Number(e.target.value) : ''); setPage(1) }}
+            placeholder="From"
+            className="w-20 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
+          />
+          <span className="text-xs text-gray-400">–</span>
+          <input
+            type="number"
+            value={gradYearTo}
+            onChange={(e) => { setGradYearTo(e.target.value ? Number(e.target.value) : ''); setPage(1) }}
+            placeholder="To"
+            className="w-20 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
+          />
+          {(gradYearFrom !== '' || gradYearTo !== '') && (
+            <button
+              onClick={() => { setGradYearFrom(''); setGradYearTo('') }}
+              className="text-gray-400 hover:text-red-500 text-base leading-none transition-colors"
+              title="Clear year filter"
+            >×</button>
+          )}
+        </div>
+
+        {/* Status filter */}
+        <select
+          className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
+          value={filterStatus}
+          onChange={(e) => { setFilterStatus(e.target.value); setPage(1) }}
+        >
+          <option value="">All Statuses</option>
+          <option value="shortlisted">Shortlisted</option>
+          <option value="pending">Pending</option>
+          <option value="rejected">Rejected</option>
+        </select>
+
+        {/* Experience level filter */}
+        <select
+          className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
+          value={filterLevel}
+          onChange={(e) => { setFilterLevel(e.target.value); setPage(1) }}
+        >
+          <option value="">All Levels</option>
+          <option value="entry">Entry Level</option>
+          <option value="junior">Junior</option>
+          <option value="mid">Mid-level</option>
+          <option value="senior">Senior</option>
+          <option value="executive">Executive</option>
+        </select>
+
         <select
           className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
           value={sortKey}
@@ -491,15 +559,6 @@ export default function Leaderboard() {
           className="border border-gray-200 dark:border-gray-600 dark:text-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
         >
           {sortDir === 'desc' ? '↓ Desc' : '↑ Asc'}
-        </button>
-
-        <button
-          onClick={() => setShowFilter((v) => !v)}
-          className={`border rounded-lg px-3 py-2 text-sm transition-colors ${
-            showFilter ? 'bg-[#EEEDFE] dark:bg-[#2d2a5a] border-[#AFA9EC] text-[#3C3489] dark:text-[#AFA9EC]' : 'border-gray-200 dark:border-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-          }`}
-        >
-          Filter
         </button>
 
         <div className="flex items-center gap-2">
@@ -579,6 +638,21 @@ export default function Leaderboard() {
           Refresh
         </button>
 
+        {isAdmin && (
+          <button
+            onClick={() => reclassifyMut.mutate()}
+            disabled={reclassifyMut.isPending}
+            className="border border-gray-200 dark:border-gray-600 dark:text-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1 disabled:opacity-50"
+            title="Reclassify all candidates by years of experience"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            {reclassifyMut.isPending ? 'Reclassifying…' : 'Reclassify Levels'}
+          </button>
+        )}
+        {reclassifyMsg && <span className="text-xs text-[#534AB7] dark:text-[#AFA9EC]">{reclassifyMsg}</span>}
+
         <button
           onClick={exportCSV}
           className="border border-gray-200 dark:border-gray-600 dark:text-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1"
@@ -591,7 +665,7 @@ export default function Leaderboard() {
         </button>
 
         <button
-          onClick={() => downloadResultsCsv(selectedJobRoleId, statusFilter || undefined)}
+          onClick={() => downloadResultsCsv(selectedJobRoleId, undefined)}
           className="border border-gray-200 dark:border-gray-600 dark:text-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1"
           title="Export all candidates with full HRIS fields (all pages)"
         >
@@ -601,22 +675,6 @@ export default function Leaderboard() {
           Export All (HRIS)
         </button>
 
-        {selectedJobRoleId && (
-          <button
-            onClick={() => bulkEmailMut.mutate()}
-            disabled={bulkEmailMut.isPending || !selectedJobRoleId}
-            className="border border-[#534AB7]/40 text-[#534AB7] dark:text-[#AFA9EC] rounded-lg px-3 py-2 text-sm hover:bg-[#EEEDFE] dark:hover:bg-[#2d2a5a] flex items-center gap-1.5 disabled:opacity-50 transition-colors"
-            title="Send next-steps email to all shortlisted candidates who haven't been emailed yet"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-            {bulkEmailMut.isPending ? 'Sending…' : 'Bulk Email Shortlisted'}
-          </button>
-        )}
-        {bulkEmailMsg && (
-          <span className="text-xs text-[#1D9E75] font-medium">{bulkEmailMsg}</span>
-        )}
       </div>
 
       {/* Score range drill-down banner */}
@@ -681,120 +739,6 @@ export default function Leaderboard() {
           >
             Clear selection
           </button>
-        </div>
-      )}
-
-      {/* Filter panel */}
-      {showFilter && (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-4 flex flex-wrap gap-4 items-end">
-          <div>
-            <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Status</label>
-            <select
-              className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="">All</option>
-              <option value="shortlisted">Shortlisted</option>
-              <option value="review">Needs Review</option>
-              <option value="pending">Pending</option>
-              <option value="rejected">Rejected</option>
-              <option value="error">Error</option>
-              <option value="needs_review">Needs Manual Review</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Experience Level</label>
-            <select
-              className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
-              value={expFilter}
-              onChange={(e) => setExpFilter(e.target.value)}
-            >
-              <option value="">All Levels</option>
-              <option value="junior">Junior</option>
-              <option value="mid">Mid-level</option>
-              <option value="senior">Senior</option>
-              <option value="executive">Executive / Lead</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Min. Years Exp.</label>
-            <select
-              className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
-              value={yrsFilter}
-              onChange={(e) => setYrsFilter(e.target.value)}
-            >
-              <option value="">Any</option>
-              <option value="1">1+ yr</option>
-              <option value="2">2+ yrs</option>
-              <option value="3">3+ yrs</option>
-              <option value="5">5+ yrs</option>
-              <option value="8">8+ yrs</option>
-              <option value="10">10+ yrs</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Min. Grad. Year</label>
-            <input
-              type="number"
-              min={1980}
-              max={2040}
-              placeholder="e.g. 2022"
-              className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-1.5 text-sm focus:outline-none w-28"
-              value={gradYearFilter}
-              onChange={(e) => setGradYearFilter(e.target.value)}
-            />
-          </div>
-          <button
-            className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            onClick={() => { setStatusFilter(''); setExpFilter(''); setYrsFilter(''); setGradYearFilter(''); setGroupByExp(true); setShowFilter(false) }}
-          >
-            Clear filters
-          </button>
-
-          {/* Saved presets */}
-          <div className="w-full border-t border-gray-100 dark:border-gray-700 pt-3 flex flex-wrap gap-3 items-end">
-            <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Saved presets</label>
-              {filterPresets.length === 0 ? (
-                <p className="text-xs text-gray-300 dark:text-gray-600 italic">No saved presets yet</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {filterPresets.map((p) => (
-                    <div key={p.name} className="flex items-center gap-1 bg-[#EEEDFE] dark:bg-[#2d2a5a] rounded-lg px-2 py-1">
-                      <button
-                        onClick={() => applyFilterPreset(p)}
-                        className="text-xs text-[#534AB7] dark:text-[#AFA9EC] font-medium hover:underline"
-                      >{p.name}</button>
-                      <button
-                        onClick={() => deleteFilterPreset(p.name)}
-                        className="text-[10px] text-gray-400 hover:text-red-400 ml-0.5"
-                        title="Delete preset"
-                      >✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Save current as preset</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={presetName}
-                  onChange={(e) => setPresetName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') saveFilterPreset() }}
-                  placeholder="Preset name…"
-                  className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 w-36"
-                />
-                <button
-                  onClick={saveFilterPreset}
-                  disabled={!presetName.trim()}
-                  className="text-xs font-semibold bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-40 text-white px-3 py-1.5 rounded-lg transition-colors"
-                >Save</button>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
@@ -886,18 +830,20 @@ export default function Leaderboard() {
             </thead>
             <tbody>
               {(() => {
-                const EXP_ORDER = ['executive', 'senior', 'mid', 'junior']
+                const EXP_ORDER = ['executive', 'senior', 'mid', 'junior', 'entry']
                 const EXP_LABELS: Record<string, string> = {
                   executive: 'Executive / Lead',
                   senior: 'Senior',
                   mid: 'Mid-level',
-                  junior: 'Junior / Entry-level',
+                  junior: 'Junior',
+                  entry: 'Entry Level',
                 }
                 const EXP_COLORS: Record<string, string> = {
                   executive: 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]',
                   senior: 'bg-[#EEEDFE] text-[#3C3489] border-[#AFA9EC]',
                   mid: 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]',
                   junior: 'bg-[#FAEEDA] text-[#633806] border-[#EF9F27]',
+                  entry: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-500',
                 }
 
                 const renderRow = (item: typeof items[0], idx: number) => (
@@ -1119,16 +1065,16 @@ export default function Leaderboard() {
                 )
 
                 if (!groupByExp) {
-                  return items.map((item, idx) => renderRow(item, idx))
+                  return items.map((item, idx) => renderRow(item, (page - 1) * PAGE_SIZE + idx))
                 }
 
                 // Grouped view: organize by experience level in a fixed order
                 const groups = EXP_ORDER.map((level) => ({
                   level,
-                  rows: items.filter((r) => (r.candidate_experience_level ?? 'mid') === level),
+                  rows: items.filter((r) => (r.candidate_experience_level ?? 'entry') === level),
                 })).filter((g) => g.rows.length > 0)
 
-                let globalIdx = 0
+                let globalIdx = (page - 1) * PAGE_SIZE
                 return groups.flatMap(({ level, rows }) => [
                   <tr key={`group-${level}`} className="bg-gray-50 dark:bg-gray-800/60">
                     <td colSpan={isAdmin ? 13 : 12} className="px-4 py-2">

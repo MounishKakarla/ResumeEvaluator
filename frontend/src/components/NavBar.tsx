@@ -8,12 +8,12 @@ import LogoWhite from '../assets/Tektalis_Logo_White.svg'
 
 const navItems = [
   { label: 'Job Roles', path: '/configure' },
-  { label: 'Ingestion', path: '/upload' },
+  { label: 'Resume Intake', path: '/upload' },
   { label: 'Leaderboard', path: '/leaderboard' },
-  { label: 'Search', path: '/search' },
 ]
 const adminNavItems = [
-  { label: 'Email Log', path: '/email-ingestion' },
+  { label: 'Email Config', path: '/email-ingestion' },
+  { label: 'Audit Logs', path: '/audit' },
   { label: 'Users', path: '/users' },
 ]
 

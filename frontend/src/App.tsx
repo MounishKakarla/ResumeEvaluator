@@ -10,6 +10,7 @@ import EmailIngestion from './pages/EmailIngestion'
 import Users from './pages/Users'
 import Landing from './pages/Landing'
 import Search from './pages/Search'
+import AuditLogs from './pages/AuditLogs'
 import Layout from './components/Layout'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -97,6 +98,17 @@ export default function App() {
           <ProtectedRoute>
             <Layout>
               <Users />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/audit"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <AuditLogs />
             </Layout>
           </ProtectedRoute>
         }

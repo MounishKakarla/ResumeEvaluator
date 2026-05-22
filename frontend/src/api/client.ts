@@ -78,6 +78,7 @@ export interface JobRole {
   auto_email_enabled: boolean
   tfidf_threshold: number
   min_graduation_year?: number | null
+  max_graduation_year?: number | null
 }
 
 export interface JobRoleCreate {
@@ -95,6 +96,8 @@ export interface JobRoleCreate {
   preferred_majors?: string[]
   filter_experience_levels?: string[]
   auto_email_enabled?: boolean
+  min_graduation_year?: number | null
+  max_graduation_year?: number | null
 }
 
 // ─── Enrichment ──────────────────────────────────────────────────────────────
@@ -1017,6 +1020,26 @@ export async function triggerGraphFetch(fromDate?: string, toDate?: string): Pro
     from_date: fromDate ?? '',
     to_date: toDate ?? '',
   })
+  return data
+}
+
+export async function stopGraphFetch(): Promise<{ message: string }> {
+  const { data } = await apiClient.post<{ message: string }>('/admin/stop-graph-fetch')
+  return data
+}
+
+export async function triggerImapFetch(): Promise<{ message: string }> {
+  const { data } = await apiClient.post<{ message: string }>('/admin/trigger-imap-fetch')
+  return data
+}
+
+export async function stopImapFetch(): Promise<{ message: string }> {
+  const { data } = await apiClient.post<{ message: string }>('/admin/stop-imap-fetch')
+  return data
+}
+
+export async function reclassifyExperienceLevels(): Promise<{ updated: number; total: number }> {
+  const { data } = await apiClient.post<{ updated: number; total: number }>('/admin/reclassify-experience-levels')
   return data
 }
 

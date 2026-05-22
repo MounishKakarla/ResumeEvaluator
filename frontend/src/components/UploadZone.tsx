@@ -2,6 +2,7 @@ import { useDropzone } from 'react-dropzone'
 
 interface UploadZoneProps {
   onFiles: (files: File[]) => void
+  onFolderClick?: () => void
 }
 
 const MAX_SIZE_BYTES = 20 * 1024 * 1024 // 20 MB
@@ -11,7 +12,7 @@ const ACCEPTED_TYPES = {
   'application/msword': ['.doc'],
 }
 
-export default function UploadZone({ onFiles }: UploadZoneProps) {
+export default function UploadZone({ onFiles, onFolderClick }: UploadZoneProps) {
   const { getRootProps, getInputProps, isDragActive, fileRejections } = useDropzone({
     onDrop: (accepted) => {
       if (accepted.length > 0) onFiles(accepted)
@@ -59,6 +60,19 @@ export default function UploadZone({ onFiles }: UploadZoneProps) {
           {isDragActive ? 'Drop files here' : 'Drop PDFs or DOCX here'}
         </p>
         <p className="text-xs text-gray-400 dark:text-gray-500">or click to browse &mdash; PDF / DOCX, max 20 MB each</p>
+
+        {onFolderClick && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onFolderClick() }}
+            className="mt-3 flex items-center gap-1.5 text-xs text-[#534AB7] dark:text-[#AFA9EC] hover:underline font-medium"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v1M3 7v11a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2 2v9z" />
+            </svg>
+            Import Folder
+          </button>
+        )}
       </div>
 
       {fileRejections.length > 0 && (

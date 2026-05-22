@@ -3,8 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
 import type { QueuedFile, DetectedSection } from '../store/useAppStore'
-import { uploadResume, getResumes, deleteResume, archiveResume, runEvaluation, getJobRoles, getInboundEmails, bulkImportCandidates, getEvaluationStatus, reparseAllCandidates } from '../api/client'
-import type { UploadResponse, JobRole, BulkImportResult, ParseSettings, EvaluationStatus } from '../api/client'
+import { uploadResume, getResumes, deleteResume, archiveResume, runEvaluation, getJobRoles, getEvaluationStatus, reparseAllCandidates } from '../api/client'
+import type { UploadResponse, JobRole, ParseSettings, EvaluationStatus } from '../api/client'
 import UploadZone from '../components/UploadZone'
 import StatusBadge from '../components/StatusBadge'
 
@@ -65,25 +65,7 @@ export default function Upload() {
     },
   })
 
-  // ── Bulk Import ────────────────────────────────────────────────────────────
-  const [bulkFile, setBulkFile] = useState<File | null>(null)
-  const [bulkResult, setBulkResult] = useState<BulkImportResult | null>(null)
-  const bulkImportRef = useRef<HTMLInputElement>(null)
-  const bulkImportMut = useMutation({
-    mutationFn: () => bulkImportCandidates(bulkFile!),
-    onSuccess: (result) => {
-      setBulkResult(result)
-      setBulkFile(null)
-      if (bulkImportRef.current) bulkImportRef.current.value = ''
-      queryClient.invalidateQueries({ queryKey: ['candidate-search'] })
-    },
-  })
-
   // ── Inbound Email History ──────────────────────────────────────────────────
-  const { data: emailsData } = useQuery({
-    queryKey: ['inboundEmails'],
-    queryFn: () => getInboundEmails({ limit: 20 }),
-  })
   const [settings, setSettings] = useState<ParseSettings>({
     ocrFallback: true,
     stripHeaders: true,
@@ -152,7 +134,7 @@ export default function Upload() {
 
   // Refs for folder / multi-file bulk pickers
   const folderInputRef = useRef<HTMLInputElement>(null)
-  const multiFileInputRef = useRef<HTMLInputElement>(null)
+
 
   // Removed nameInputs and emailInputs since auto-upload uses file data directly
   const sseRefs = useRef<Record<number, EventSource>>({})
@@ -302,7 +284,7 @@ export default function Upload() {
       <div className="flex-1 flex flex-col gap-4 p-6 overflow-y-auto">
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
           <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-3">Upload Resumes</h2>
-          <UploadZone onFiles={handleFiles} />
+          <UploadZone onFiles={handleFiles} onFolderClick={() => folderInputRef.current?.click()} />
         </div>
 
         {/* Error banner */}
@@ -393,65 +375,23 @@ export default function Upload() {
           </div>
         )}
 
-        {/* ── Bulk Resume Import from Folder / Files ───────────────────── */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-          <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-1">Bulk Resume Import</h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-            Import multiple PDF or DOCX resumes at once. Use <span className="font-medium text-gray-600 dark:text-gray-300">Import Folder</span> to pick an entire directory, or <span className="font-medium text-gray-600 dark:text-gray-300">Select Files</span> to choose individual files.
-          </p>
-          {/* Hidden inputs */}
-          <input
-            ref={folderInputRef}
-            type="file"
-            // @ts-expect-error webkitdirectory is non-standard but widely supported
-            webkitdirectory=""
-            multiple
-            accept=".pdf,.docx,.doc"
-            className="hidden"
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []).filter((f) =>
-                /\.(pdf|docx|doc)$/i.test(f.name)
-              )
-              if (files.length) handleFiles(files)
-              if (folderInputRef.current) folderInputRef.current.value = ''
-            }}
-          />
-          <input
-            ref={multiFileInputRef}
-            type="file"
-            multiple
-            accept=".pdf,.docx,.doc"
-            className="hidden"
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? [])
-              if (files.length) handleFiles(files)
-              if (multiFileInputRef.current) multiFileInputRef.current.value = ''
-            }}
-          />
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => folderInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 transition-colors"
-            >
-              <svg className="w-4 h-4 text-[#534AB7]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v1M3 7v11a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2 2v9z" />
-              </svg>
-              Import Folder
-            </button>
-            <button
-              onClick={() => multiFileInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 transition-colors"
-            >
-              <svg className="w-4 h-4 text-[#534AB7]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Select Files
-            </button>
-          </div>
-          <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-3">
-            Supported formats: PDF, DOCX, DOC · Files are added to the upload queue above and processed automatically.
-          </p>
-        </div>
+        {/* Hidden folder input (triggered from UploadZone) */}
+        <input
+          ref={folderInputRef}
+          type="file"
+          // @ts-expect-error webkitdirectory is non-standard but widely supported
+          webkitdirectory=""
+          multiple
+          accept=".pdf,.docx,.doc"
+          className="hidden"
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []).filter((f) =>
+              /\.(pdf|docx|doc)$/i.test(f.name)
+            )
+            if (files.length) handleFiles(files)
+            if (folderInputRef.current) folderInputRef.current.value = ''
+          }}
+        />
 
         {/* ── Run Evaluation ────────────────────────────────────────────── */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
@@ -517,102 +457,20 @@ export default function Upload() {
           )}
         </div>
 
-        {/* ── Bulk CSV / Excel Import ───────────────────────────────────── */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+        {/* ── Bulk CSV / Excel Import (disabled) ─────────────────────────── */}
+        {/* <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
           <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-1">Bulk Candidate Import</h2>
           <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-            Import candidate metadata from a CSV or Excel file. Columns: <span className="font-mono">name, email, phone, linkedin_url, github_url, portfolio_url, current_title, experience_level</span>
+            Import candidate metadata from a CSV or Excel file. Columns: name, email, phone, linkedin_url, github_url, portfolio_url, current_title, experience_level
           </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              ref={bulkImportRef}
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              className="hidden"
-              onChange={(e) => {
-                setBulkResult(null)
-                setBulkFile(e.target.files?.[0] ?? null)
-              }}
-            />
-            <button
-              onClick={() => bulkImportRef.current?.click()}
-              className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 transition-colors"
-            >
-              {bulkFile ? bulkFile.name : 'Choose CSV / XLSX…'}
-            </button>
-            <button
-              onClick={() => bulkImportMut.mutate()}
-              disabled={!bulkFile || bulkImportMut.isPending}
-              className="px-4 py-2 text-sm bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white font-semibold rounded-lg transition-colors"
-            >
-              {bulkImportMut.isPending ? 'Importing…' : 'Import'}
-            </button>
-            {bulkFile && (
-              <button
-                onClick={() => { setBulkFile(null); setBulkResult(null); if (bulkImportRef.current) bulkImportRef.current.value = '' }}
-                className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          {bulkImportMut.isError && (
-            <p className="text-xs text-red-500 mt-2">Import failed. Check the file format and try again.</p>
-          )}
-          {bulkResult && (
-            <div className="mt-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-sm space-y-1">
-              <p className="text-gray-700 dark:text-gray-200">
-                <span className="font-semibold text-green-600 dark:text-green-400">{bulkResult.created}</span> created ·{' '}
-                <span className="font-semibold text-blue-600 dark:text-blue-400">{bulkResult.updated}</span> updated
-                {bulkResult.errors.length > 0 && (
-                  <> · <span className="font-semibold text-red-500">{bulkResult.errors.length}</span> error{bulkResult.errors.length !== 1 ? 's' : ''}</>
-                )}
-              </p>
-              {bulkResult.errors.length > 0 && (
-                <ul className="text-xs text-red-500 space-y-0.5 max-h-24 overflow-y-auto">
-                  {bulkResult.errors.map((e, i) => <li key={i}>{e}</li>)}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
+          ... (CSV/Excel import UI hidden)
+        </div> */}
 
-        {/* ── Inbound Email History ─────────────────────────────────────── */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+        {/* ── Inbound Email History (hidden — available in Email Config page) */}
+        {/* <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
           <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-3">Email Ingestion History</h2>
-          {!emailsData || emailsData.items.length === 0 ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 py-4 text-center">No inbound emails yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {emailsData.items.map((email) => (
-                <div key={email.id} className="flex items-start gap-3 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700">
-                  <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${
-                    email.status === 'processed' ? 'bg-[#1D9E75]' :
-                    email.status === 'failed' ? 'bg-[#E24B4A]' :
-                    email.status === 'no_attachment' ? 'bg-[#EF9F27]' : 'bg-gray-300'
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-gray-800 dark:text-gray-100 truncate">
-                      {email.subject || '(no subject)'}
-                    </p>
-                    <p className="text-[11px] text-gray-400 dark:text-gray-500 truncate">
-                      {email.sender_email} · {new Date(email.received_at).toLocaleDateString()}
-                      {email.job_title && ` · ${email.job_title}`}
-                    </p>
-                  </div>
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${
-                    email.status === 'processed' ? 'bg-[#E1F5EE] text-[#085041]' :
-                    email.status === 'failed' ? 'bg-[#FCEBEB] text-[#791F1F]' :
-                    email.status === 'no_attachment' ? 'bg-[#FAEEDA] text-[#633806]' :
-                    'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
-                  }`}>
-                    {email.status}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+          ...
+        </div> */}
 
         {/* ── Stored Resumes: Database Persistence ────────────────────── */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mt-4">
@@ -621,7 +479,7 @@ export default function Upload() {
               <svg className="w-5 h-5 text-[#534AB7]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9l-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
-              Database: Evaluated Resumes
+              Evaluated Resumes
             </h2>
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-400">{storedResumes?.length || 0} Total</span>
