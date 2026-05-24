@@ -203,6 +203,9 @@ class JobRole(Base):
     # [min_graduation_year, max_graduation_year]. Null on either end means unbounded.
     min_graduation_year = Column(Integer, nullable=True)
     max_graduation_year = Column(Integer, nullable=True)
+    # When True, all candidates for this role are scored with fresher-friendly rules:
+    # design-verb project boost (+15%), no recency decay, global skill coverage.
+    is_entry_level = Column(Boolean, nullable=False, default=False)
 
     # Relationships
     creator = relationship("User", back_populates="job_roles", foreign_keys=[created_by])
@@ -251,6 +254,7 @@ class JobRoleSkill(Base):
         nullable=False,
     )
     is_keyword = Column(Boolean, nullable=False, default=False)
+    is_required = Column(Boolean, nullable=False, default=True)
 
     # Relationships
     job_role = relationship("JobRole", back_populates="job_role_skills")
@@ -275,6 +279,7 @@ class Evaluation(Base):
     project_score = Column(Float, nullable=False, default=0.0)
     skill_score = Column(Float, nullable=False, default=0.0)
     education_score = Column(Float, nullable=False, default=0.0)
+    experience_score = Column(Float, nullable=False, default=0.0)
     skills_matched = Column(Text, nullable=True)          # JSON list[SkillMatchDetail]
     excerpts = Column(Text, nullable=True)                 # JSON list[str]
     requirements_breakdown = Column(Text, nullable=True)   # JSON list[RequirementScore] when req-mode

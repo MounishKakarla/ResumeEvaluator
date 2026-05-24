@@ -47,6 +47,10 @@ def _classify_severity(flag: Dict[str, Any]) -> str:
     if flag_type == "degree_mismatch":
         return "high"
 
+    if flag_type == "github_skill_gap":
+        # Severity is pre-computed by the cross-reference logic and stored directly.
+        return flag.get("severity", "medium")
+
     return "medium"
 
 
@@ -101,6 +105,13 @@ def _generate_recruiter_note(flag: Dict[str, Any], severity: str) -> str:
         return (
             f"Education discrepancy: resume claims '{resume_val}', "
             f"LinkedIn shows '{linkedin_val}'."
+        )
+
+    if flag_type == "github_skill_gap":
+        count = len(resume_val.split(",")) if resume_val else 0
+        return (
+            f"GitHub repositories show no evidence of {count} claimed skill(s): {resume_val}. "
+            f"Candidate may be inflating their resume — verify in technical interview."
         )
 
     return f"Inconsistency detected in field '{field}': resume={resume_val}, LinkedIn={linkedin_val}."

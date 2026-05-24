@@ -231,6 +231,8 @@ def _process_resume(
         # Always update experience_level so re-uploads correct mis-classifications
         _yrs_raw = llm_meta.get("years_experience") or extract_years_experience(sections)
         _yrs = float(_yrs_raw) if _yrs_raw is not None else None
+        # Extract graduation year early — needed for entry-level override below
+        _grad_year = llm_meta.get("graduation_year") or extract_graduation_year(sections, raw_text=parsed.text)
         # Classify by years_experience (primary signal); keyword inference as fallback
         if _yrs is not None:
             if _yrs < 1:
@@ -245,11 +247,15 @@ def _process_resume(
                 exp_level = "executive"
         else:
             exp_level = llm_meta.get("experience_level") or infer_experience_level(parsed.text)
+        # Graduation year override: candidates graduating this year or last year are always entry-level
+        # regardless of extracted years_experience (which may have counted internships)
+        if _grad_year and _grad_year >= datetime.now().year - 1:
+            exp_level = "entry"
         candidate.experience_level = exp_level
         if getattr(candidate, 'years_experience', None) is None:
             candidate.years_experience = _yrs
         if getattr(candidate, 'graduation_year', None) is None:
-            candidate.graduation_year = llm_meta.get("graduation_year") or extract_graduation_year(sections, raw_text=parsed.text)
+            candidate.graduation_year = _grad_year
     except (AttributeError, TypeError) as exc:
         logger.debug("Profile field extraction failed: %s", exc)
     sections_detected = list({s.type for s in sections})

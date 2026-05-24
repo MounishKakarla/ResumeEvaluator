@@ -1,13 +1,14 @@
 interface SkillTagProps {
   label: string
   onRemove?: () => void
-  variant?: 'purple' | 'teal' | 'muted'
+  variant?: 'purple' | 'teal' | 'muted' | 'amber'
 }
 
 const variantClasses: Record<string, string> = {
   purple: 'bg-[#EEEDFE] text-[#3C3489] border-[#AFA9EC]',
   teal: 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]',
   muted: 'bg-gray-100 text-gray-600 border-gray-300',
+  amber: 'bg-amber-50 text-amber-700 border-amber-300',
 }
 
 export default function SkillTag({ label, onRemove, variant = 'purple' }: SkillTagProps) {

@@ -20,9 +20,10 @@ router = APIRouter(prefix="/job-roles", tags=["job-roles"])
 class JobRoleDetail(JobRoleOut):
     skill_ids: List[int] = []
     skill_names: List[str] = []
+    skill_required_flags: List[bool] = []
 
 
-def _detail(role: JobRole, skill_ids: List[int], skill_names: List[str]) -> JobRoleDetail:
+def _detail(role: JobRole, skill_ids: List[int], skill_names: List[str], skill_required_flags: Optional[List[bool]] = None) -> JobRoleDetail:
     preferred_majors: List[str] = []
     if role.preferred_majors:
         try:
@@ -52,9 +53,11 @@ def _detail(role: JobRole, skill_ids: List[int], skill_names: List[str]) -> JobR
         filter_experience_levels=filter_experience_levels,
         skill_ids=skill_ids,
         skill_names=skill_names,
+        skill_required_flags=skill_required_flags if skill_required_flags is not None else [True] * len(skill_ids),
         tfidf_threshold=getattr(role, "tfidf_threshold", 0.0) or 0.0,
         min_graduation_year=getattr(role, "min_graduation_year", None),
         max_graduation_year=getattr(role, "max_graduation_year", None),
+        is_entry_level=getattr(role, "is_entry_level", False) or False,
     )
 
 
@@ -87,7 +90,8 @@ def list_job_roles(
     for r in roles:
         skill_ids = [jrs.skill_id for jrs in r.job_role_skills]
         skill_names = [jrs.skill.name for jrs in r.job_role_skills if jrs.skill]
-        result.append(_detail(r, skill_ids, skill_names))
+        skill_required_flags = [getattr(jrs, "is_required", True) for jrs in r.job_role_skills]
+        result.append(_detail(r, skill_ids, skill_names, skill_required_flags))
     return result
 
 
@@ -102,7 +106,8 @@ def get_job_role(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job role not found")
     skill_ids = [jrs.skill_id for jrs in r.job_role_skills]
     skill_names = [jrs.skill.name for jrs in r.job_role_skills if jrs.skill]
-    return _detail(r, skill_ids, skill_names)
+    skill_required_flags = [getattr(jrs, "is_required", True) for jrs in r.job_role_skills]
+    return _detail(r, skill_ids, skill_names, skill_required_flags)
 
 
 @router.patch("/{role_id}/intake", response_model=JobRoleDetail)
@@ -144,7 +149,8 @@ def set_intake_pause(
 
     skill_ids = [jrs.skill_id for jrs in role.job_role_skills]
     skill_names = [jrs.skill.name for jrs in role.job_role_skills if jrs.skill]
-    return _detail(role, skill_ids, skill_names)
+    skill_required_flags = [getattr(jrs, "is_required", True) for jrs in role.job_role_skills]
+    return _detail(role, skill_ids, skill_names, skill_required_flags)
 
 
 @router.post("", response_model=JobRoleDetail, status_code=status.HTTP_201_CREATED)
@@ -175,25 +181,31 @@ def create_job_role(
         auto_email_enabled=body.auto_email_enabled,
         tfidf_threshold=body.tfidf_threshold or 0.0,
         min_graduation_year=body.min_graduation_year or None,
+        max_graduation_year=body.max_graduation_year or None,
+        is_entry_level=body.is_entry_level,
     )
     db.add(role)
     db.flush()
 
+    flags = body.skill_required_flags or []
     skill_names: List[str] = []
-    for skill_id in body.skill_ids:
+    stored_flags: List[bool] = []
+    for i, skill_id in enumerate(body.skill_ids):
         skill = db.query(Skill).filter(Skill.id == skill_id).first()
         if skill is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Skill {skill_id} not found",
             )
-        db.add(JobRoleSkill(job_role_id=role.id, skill_id=skill_id, is_keyword=False))
+        is_req = flags[i] if i < len(flags) else True
+        db.add(JobRoleSkill(job_role_id=role.id, skill_id=skill_id, is_keyword=False, is_required=is_req))
         skill_names.append(skill.name)
+        stored_flags.append(is_req)
 
     db.commit()
     r = _load_role(role.id, db)
     assert r is not None
-    return _detail(r, body.skill_ids, skill_names)
+    return _detail(r, body.skill_ids, skill_names, stored_flags)
 
 
 @router.put("/{role_id}", response_model=JobRoleDetail)
@@ -228,23 +240,29 @@ def update_job_role(
     role.auto_email_enabled = body.auto_email_enabled
     role.tfidf_threshold = body.tfidf_threshold or 0.0
     role.min_graduation_year = body.min_graduation_year or None
+    role.max_graduation_year = body.max_graduation_year or None
+    role.is_entry_level = body.is_entry_level
 
     db.query(JobRoleSkill).filter(JobRoleSkill.job_role_id == role_id).delete()
+    flags = body.skill_required_flags or []
     skill_names: List[str] = []
-    for skill_id in body.skill_ids:
+    stored_flags: List[bool] = []
+    for i, skill_id in enumerate(body.skill_ids):
         skill = db.query(Skill).filter(Skill.id == skill_id).first()
         if skill is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Skill {skill_id} not found",
             )
-        db.add(JobRoleSkill(job_role_id=role_id, skill_id=skill_id, is_keyword=False))
+        is_req = flags[i] if i < len(flags) else True
+        db.add(JobRoleSkill(job_role_id=role_id, skill_id=skill_id, is_keyword=False, is_required=is_req))
         skill_names.append(skill.name)
+        stored_flags.append(is_req)
 
     db.commit()
     r = _load_role(role_id, db)
     assert r is not None
-    return _detail(r, body.skill_ids, skill_names)
+    return _detail(r, body.skill_ids, skill_names, stored_flags)
 
 
 @router.put("/{role_id}/requirements", response_model=List[JobRoleRequirementOut])

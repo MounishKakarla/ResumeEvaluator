@@ -11,6 +11,7 @@ public repositories. Provides two modes:
 from __future__ import annotations
 
 import base64
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -120,6 +121,99 @@ def _aggregate_languages(repos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Package manifest scanning — reads dependency files from a repo
+# ---------------------------------------------------------------------------
+
+_MANIFEST_FILES = [
+    "requirements.txt",
+    "package.json",
+    "Pipfile",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "Cargo.toml",
+    "composer.json",
+    "pyproject.toml",
+]
+
+# Common utility/tooling packages that don't represent a meaningful skill signal
+_MANIFEST_NOISE = {
+    "babel", "eslint", "prettier", "webpack", "jest", "mocha", "chai",
+    "nodemon", "dotenv", "cross-env", "rimraf", "husky", "lint-staged",
+    "typescript", "ts-node", "@types", "autoprefixer", "postcss",
+    "setuptools", "pip", "wheel", "pytest", "black", "flake8", "mypy",
+    "coverage", "tox", "virtualenv", "packaging", "six", "certifi",
+    "charset-normalizer", "urllib3", "idna", "requests-oauthlib",
+}
+
+
+def _fetch_manifests(
+    client: httpx.Client,
+    username: str,
+    repo_name: str,
+) -> List[str]:
+    """Fetch package manifests from a repo and return inferred technology names.
+
+    Reads requirements.txt, package.json, go.mod, etc. and extracts dependency
+    names as skill evidence. Returns at most 40 package names, noise-filtered.
+    """
+    found: List[str] = []
+    base = "https://api.github.com"
+
+    for filename in _MANIFEST_FILES:
+        try:
+            resp = client.get(f"{base}/repos/{username}/{repo_name}/contents/{filename}")
+            if resp.status_code != 200:
+                continue
+            content_b64 = resp.json().get("content", "").replace("\n", "")
+            content = base64.b64decode(content_b64).decode("utf-8", errors="replace")
+
+            if filename == "package.json":
+                try:
+                    pkg = json.loads(content)
+                    deps = (
+                        list(pkg.get("dependencies", {}).keys())
+                        + list(pkg.get("devDependencies", {}).keys())
+                    )
+                    for d in deps:
+                        name = d.lstrip("@").split("/")[0]
+                        if name and name.lower() not in _MANIFEST_NOISE:
+                            found.append(name)
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+
+            elif filename in ("requirements.txt", "Pipfile"):
+                for line in content.splitlines():
+                    line = line.strip()
+                    if not line or line.startswith(("#", "[", "-r", "git+")):
+                        continue
+                    pkg_name = re.split(r"[>=<!;#\s]", line)[0].strip()
+                    if pkg_name and pkg_name.lower() not in _MANIFEST_NOISE:
+                        found.append(pkg_name)
+
+            elif filename == "go.mod":
+                for m in re.finditer(r'^\s+(\S+)\s+v[\d.]+', content, re.M):
+                    parts = m.group(1).rstrip("/").split("/")
+                    name = parts[-1] if parts else ""
+                    if name and name.lower() not in _MANIFEST_NOISE:
+                        found.append(name)
+
+            elif filename == "pyproject.toml":
+                for m in re.finditer(r'"([a-zA-Z0-9_\-]+)\s*[>=<]', content):
+                    name = m.group(1)
+                    if name and name.lower() not in _MANIFEST_NOISE:
+                        found.append(name)
+
+        except Exception:
+            continue
+
+        if len(found) >= 40:
+            break
+
+    return list(dict.fromkeys(found))[:40]  # deduplicate while preserving order
+
+
+# ---------------------------------------------------------------------------
 # Inferred skills from GitHub
 # ---------------------------------------------------------------------------
 
@@ -209,6 +303,32 @@ def analyze_github_profile(
     activity_score = _compute_activity_score(repos)
     inferred_skills = _infer_skills(repos, existing_skills)
 
+    # Scan package manifests of the top 4 repos (by recency) to enrich inferred skills.
+    # This surfaces dependencies listed in requirements.txt / package.json even if the
+    # repo name/description doesn't mention them explicitly.
+    manifest_techs: List[str] = []
+    existing_lower = {s["name"].lower() for s in inferred_skills}
+    top_repos = repos[:4]
+    try:
+        with httpx.Client(timeout=10, headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}) as manifest_client:
+            for repo in top_repos:
+                repo_name = repo.get("name", "")
+                if not repo_name:
+                    continue
+                pkgs = _fetch_manifests(manifest_client, username, repo_name)
+                for pkg in pkgs:
+                    if pkg.lower() not in existing_lower:
+                        manifest_techs.append(pkg)
+                        existing_lower.add(pkg.lower())
+    except Exception:
+        pass  # manifest scan is best-effort — never fail the main enrichment
+
+    if manifest_techs:
+        inferred_skills.extend([
+            {"name": pkg, "source": "manifest", "evidence": []}
+            for pkg in manifest_techs[:30]
+        ])
+
     return {
         "username": username,
         "public_repos": user_data.get("public_repos", len(repos)),
@@ -216,6 +336,7 @@ def analyze_github_profile(
         "relevant_repos": relevant_repos,
         "activity_score": activity_score,
         "inferred_skills": inferred_skills,
+        "manifest_techs": manifest_techs[:30],
         "error": None,
     }
 

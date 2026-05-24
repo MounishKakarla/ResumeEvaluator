@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -18,6 +19,11 @@ from app.services.tfidf_filter import compute_relevance as tfidf_compute_relevan
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
+
+# ---------------------------------------------------------------------------
+# Per-job-role pause flags — set → background workers skip the job
+# ---------------------------------------------------------------------------
+_PAUSED_JOBS: set[int] = set()   # job_role_ids currently paused
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +101,108 @@ def _github_score_modifier(github_summary: dict, project_names: List[str]) -> fl
     return max(-10.0, min(10.0, modifier))
 
 
+# ---------------------------------------------------------------------------
+# Phase 2: GitHub skill cross-reference
+# Compare skills the resume claims against actual GitHub code evidence.
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+def _skill_tokens(name: str) -> List[str]:
+    """Split a skill name into normalised tokens for vocab matching.
+
+    "FastAPI" → ["fastapi"]
+    "LangChain" → ["langchain"]
+    "Natural Language Processing" → ["natural", "language", "processing"]
+    "scikit-learn" → ["scikit", "learn"]
+    """
+    parts = _re.split(r'[\s\-_./]+', name.lower())
+    return [_re.sub(r'[^a-z0-9]', '', p) for p in parts if len(p) >= 3]
+
+
+def _build_github_skill_vocab(github_summary: dict) -> set:
+    """Collect all normalised skill tokens from GitHub evidence.
+
+    Sources (in priority order):
+    - Language names   : Python, JavaScript, Go …
+    - Inferred skills  : extracted from repo names, topics, manifests
+    - Manifest techs   : requirements.txt / package.json dependencies
+    - Repo matched_skills: JD-skill tokens already matched per repo
+    """
+    vocab: set = set()
+    for lang in github_summary.get("languages", []):
+        vocab.update(_skill_tokens(lang.get("language", "")))
+    for skill in github_summary.get("inferred_skills", []):
+        vocab.update(_skill_tokens(skill.get("name", "")))
+    for tech in github_summary.get("manifest_techs", []):
+        vocab.update(_skill_tokens(tech))
+    for repo in github_summary.get("relevant_repos", []):
+        for ms in repo.get("matched_skills", []):
+            vocab.update(_skill_tokens(ms))
+    vocab.discard("")
+    return vocab
+
+
+# Conceptual / soft skills that won't appear as library identifiers in GitHub —
+# give these benefit of the doubt rather than flagging them as unverified.
+_CONCEPTUAL_SKILL_RE = _re.compile(
+    r'\b(machine\s*learning|deep\s*learning|natural\s*language|computer\s*vision|'
+    r'problem\s*solv|data\s*struct|algorithm|system\s*design|software\s*engineer|'
+    r'agile|scrum|communication|teamwork|leadership|oop|object[\s-]oriented|'
+    r'large\s*language|generative\s*ai|llm|rag)\b',
+    _re.I,
+)
+
+
+def _github_skill_cross_reference(
+    jd_skills: List[str],
+    github_summary: dict,
+) -> tuple:
+    """Compare required JD skills against GitHub code evidence.
+
+    Returns (verified, unverified) where *unverified* are skills the candidate
+    claims on their resume that have zero footprint in their GitHub repositories.
+
+    Cross-check is skipped entirely when GitHub activity_score ≤ 20 — a sparse
+    profile gives us too little signal to draw conclusions.
+    """
+    activity = github_summary.get("activity_score", 0)
+    if github_summary.get("error") or activity <= 20 or not jd_skills:
+        return list(jd_skills), []
+
+    vocab = _build_github_skill_vocab(github_summary)
+    if not vocab:
+        return list(jd_skills), []
+
+    verified: List[str] = []
+    unverified: List[str] = []
+
+    for skill in jd_skills:
+        # Conceptual skills won't appear as repo/package identifiers — skip them.
+        if _CONCEPTUAL_SKILL_RE.search(skill):
+            verified.append(skill)
+            continue
+
+        tokens = _skill_tokens(skill)
+        if not tokens:
+            verified.append(skill)
+            continue
+
+        # Full concatenated form catches compound names: "LangChain" → "langchain"
+        full_norm = "".join(tokens)
+
+        if (
+            any(tok in vocab for tok in tokens)                          # "react" ∈ vocab
+            or full_norm in vocab                                        # "langchain" ∈ vocab
+            or any(full_norm in v or v in full_norm for v in vocab if len(v) >= 3)
+        ):
+            verified.append(skill)
+        else:
+            unverified.append(skill)
+
+    return verified, unverified
+
+
 def _run_auto_enrichment(
     candidate: "Candidate",
     job_role_id: int,
@@ -107,18 +215,20 @@ def _run_auto_enrichment(
 
     # ── GitHub ────────────────────────────────────────────────────────────────
     if candidate.github_url:
+        # Fetch JD skills once — needed for both GitHub profile analysis and cross-reference
+        jd_skills = [
+            s.name for s in (
+                db.query(Skill)
+                .join(JobRoleSkill, Skill.id == JobRoleSkill.skill_id)
+                .filter(JobRoleSkill.job_role_id == job_role_id)
+                .all()
+            )
+        ]
+
         github_summary: Optional[dict] = None
         if not candidate.github_summary:
             try:
                 from app.services.github_analyzer import analyze_github_profile
-                jd_skills = [
-                    s.name for s in (
-                        db.query(Skill)
-                        .join(JobRoleSkill, Skill.id == JobRoleSkill.skill_id)
-                        .filter(JobRoleSkill.job_role_id == job_role_id)
-                        .all()
-                    )
-                ]
                 github_summary = analyze_github_profile(
                     github_url=candidate.github_url,
                     jd_skills=jd_skills,
@@ -144,6 +254,49 @@ def _run_auto_enrichment(
 
         if github_summary:
             modifier += _github_score_modifier(github_summary, project_names)
+
+            # Phase 2: cross-reference claimed skills against GitHub code evidence.
+            # Flags candidates whose resumes list technologies absent from their repos.
+            if jd_skills:
+                _verified, _unverified = _github_skill_cross_reference(jd_skills, github_summary)
+                if _unverified:
+                    _total = len(jd_skills)
+                    _rate = len(_unverified) / _total
+
+                    if len(_unverified) >= 4 and _rate >= 0.60:
+                        _sev = "high"   # strong gap → needs human review
+                    elif len(_unverified) >= 3 or _rate >= 0.50:
+                        _sev = "medium"
+                    else:
+                        _sev = None     # 1–2 unverified — acceptable noise, no flag
+
+                    if _sev:
+                        _note = (
+                            f"{len(_unverified)} of {_total} required skills have no GitHub "
+                            f"evidence: {', '.join(_unverified[:5])}"
+                            f"{'…' if len(_unverified) > 5 else ''}. "
+                            f"Recommend verifying in technical interview."
+                        )
+                        _new_flag = {
+                            "severity": _sev,
+                            "field": "github.skill_verification",
+                            "flag_type": "github_skill_gap",
+                            "resume_value": ", ".join(_unverified[:8]),
+                            "linkedin_value": None,
+                            "recruiter_note": _note,
+                        }
+                        # Merge with existing flags, replacing any stale github_skill_gap entry
+                        _flags = json.loads(candidate.consistency_flags or "[]")
+                        _flags = [f for f in _flags if f.get("flag_type") != "github_skill_gap"]
+                        _flags.append(_new_flag)
+                        candidate.consistency_flags = json.dumps(_flags)
+                        if _sev == "high":
+                            candidate.needs_manual_review = True
+                        db.commit()
+                        logger.info(
+                            "GitHub skill cross-reference: %d/%d unverified for candidate %d (severity=%s)",
+                            len(_unverified), _total, candidate.id, _sev,
+                        )
 
     # ── LinkedIn ──────────────────────────────────────────────────────────────
     if candidate.linkedin_url and not candidate.linkedin_data:
@@ -408,8 +561,10 @@ def _run_evaluation(
         .filter(JobRoleSkill.job_role_id == job_role_id)
         .all()
     )
+    skill_id_to_required = {jrs.skill_id: getattr(jrs, "is_required", True) for jrs in jrs_rows}
     skill_ids = [jrs.skill_id for jrs in jrs_rows]
     skills: List[Skill] = db.query(Skill).filter(Skill.id.in_(skill_ids)).all()
+    skill_required_flags = [skill_id_to_required.get(s.id, True) for s in skills]
 
     # (Removed early exit)
     # if not skills:
@@ -453,6 +608,21 @@ def _run_evaluation(
             preferred_majors=preferred_majors,
         )
     else:
+        _cand_years: Optional[float] = None
+        _is_fresher = False
+        if _candidate is not None:
+            if getattr(_candidate, "years_experience", None) is not None:
+                _cand_years = float(_candidate.years_experience)
+            _grad_year = getattr(_candidate, "graduation_year", None)
+            _exp_level = getattr(_candidate, "experience_level", None)
+            _current_year = datetime.now().year
+            # Freshers: recent grads (this/last year) or entry/intern level candidates.
+            # For freshers, recency decay is skipped so projects from 2–4 years ago still score at 1.0.
+            _is_fresher = bool(
+                getattr(job_role, "is_entry_level", False) or
+                _exp_level in ("entry", "intern") or
+                (_grad_year and _grad_year >= _current_year - 1)
+            )
         result = score_resume(
             sections=sections,
             required_skills=skills,
@@ -462,6 +632,10 @@ def _run_evaluation(
             jd_description=job_role.description,
             min_degree=job_role.min_degree,
             preferred_majors=preferred_majors,
+            skill_required_flags=skill_required_flags,
+            candidate_years=_cand_years,
+            min_experience_years=int(job_role.min_experience or 0),
+            is_fresher=_is_fresher,
         )
 
     skills_matched_json = json.dumps([
@@ -564,6 +738,7 @@ def _run_evaluation(
         existing.project_score = result.project_score
         existing.skill_score = result.skill_score
         existing.education_score = result.education_score
+        existing.experience_score = result.experience_score
         existing.skills_matched = skills_matched_json
         existing.excerpts = excerpts_json
         existing.requirements_breakdown = requirements_breakdown_json
@@ -580,6 +755,7 @@ def _run_evaluation(
             project_score=result.project_score,
             skill_score=result.skill_score,
             education_score=result.education_score,
+            experience_score=result.experience_score,
             skills_matched=skills_matched_json,
             excerpts=excerpts_json,
             requirements_breakdown=requirements_breakdown_json,
@@ -695,6 +871,13 @@ def _background_evaluate(
     db = SessionLocal()
     try:
         for resume_id in resume_ids:
+            # Honour pause flag — stop processing but keep remaining as queued
+            if job_role_id in _PAUSED_JOBS:
+                logger.info(
+                    "Evaluation paused for job_role_id=%d; %d resumes remain queued.",
+                    job_role_id, len(resume_ids),
+                )
+                break
             try:
                 _run_evaluation(resume_id, job_role_id, weights, db)
             except Exception as exc:
@@ -781,6 +964,29 @@ def evaluate(
     if not resume_ids:
         return EvaluationResponse(job_id="none", queued_count=0)
 
+    # Skip resumes that already have a completed evaluation (eval_status IS NULL = scored)
+    # so re-running only processes new/unscored resumes.
+    already_scored: set[int] = {
+        row.resume_id
+        for row in db.query(Evaluation.resume_id)
+        .filter(
+            Evaluation.job_role_id == body.job_role_id,
+            Evaluation.eval_status.is_(None),  # NULL = fully scored
+        )
+        .all()
+    }
+    resume_ids = [rid for rid in resume_ids if rid not in already_scored]
+
+    if not resume_ids:
+        return EvaluationResponse(job_id="none", queued_count=0)
+
+    # Pre-queue all resumes in DB so they survive a server restart.
+    for rid in resume_ids:
+        _queue_evaluation(rid, body.job_role_id, db)
+
+    # Clear any existing pause flag for this job role when a new run is started.
+    _PAUSED_JOBS.discard(body.job_role_id)
+
     job_id = str(uuid.uuid4())
     background_tasks.add_task(
         _background_evaluate,
@@ -818,6 +1024,61 @@ def bulk_rerun(
     background_tasks.add_task(_background_bulk_rerun, job_role_id=body.job_role_id)
 
     return EvaluationResponse(job_id=job_id, queued_count=count)
+
+
+# ---------------------------------------------------------------------------
+# Pause / Resume endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/pause", status_code=status.HTTP_200_OK)
+def pause_evaluation(
+    job_role_id: int,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Pause an in-progress bulk evaluation for a job role.
+
+    The running background task will stop after the current resume finishes.
+    Remaining resumes stay in eval_status='queued' and can be resumed later.
+    """
+    _PAUSED_JOBS.add(job_role_id)
+    return {"job_role_id": job_role_id, "paused": True}
+
+
+@router.post("/resume", status_code=status.HTTP_202_ACCEPTED)
+def resume_evaluation(
+    job_role_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Resume a paused evaluation by processing all queued resumes.
+
+    Picks up from exactly where it left off — only processes resumes
+    still in eval_status='queued' for this job role.
+    """
+    _PAUSED_JOBS.discard(job_role_id)
+
+    queued_resume_ids: List[int] = [
+        row.resume_id
+        for row in db.query(Evaluation.resume_id)
+        .filter(
+            Evaluation.job_role_id == job_role_id,
+            Evaluation.eval_status == "queued",
+        )
+        .all()
+    ]
+
+    if not queued_resume_ids:
+        return {"job_role_id": job_role_id, "queued_count": 0, "message": "Nothing queued to resume."}
+
+    background_tasks.add_task(
+        _background_evaluate,
+        resume_ids=queued_resume_ids,
+        job_role_id=job_role_id,
+        weights=None,
+    )
+
+    return {"job_role_id": job_role_id, "queued_count": len(queued_resume_ids)}
 
 
 @router.post("/{evaluation_id}/send-next-steps", status_code=status.HTTP_200_OK)

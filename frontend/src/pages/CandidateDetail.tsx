@@ -1,23 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getResultDetail,
   shortlistCandidate,
   sendCandidateEmail,
   sendRejectionEmail,
-  getEnrichment,
-  enrichGitHub,
-  enrichLinkedIn,
-  enrichPortfolio,
-  getFeedbackForCandidate,
-  createFeedback,
-  deleteFeedback,
-  updateResumeSections,
-  getComments,
-  createComment,
-  updateComment,
-  deleteComment,
+  reclassifyAndRescore,
   reparseCandidate,
 } from '../api/client'
 import type {
@@ -25,122 +14,32 @@ import type {
   SkillMatch,
   EvaluationDetail,
   RequirementBreakdown,
-  ConsistencyFlag,
-  GitHubSummary,
-  PortfolioSummary,
-  InterviewFeedback,
-  FeedbackCreate,
   ResumeSection,
-  CandidateComment,
 } from '../api/client'
 import ScoreBar from '../components/ScoreBar'
 import StatusBadge from '../components/StatusBadge'
+import EnrichmentTab from '../components/CandidateDetail/EnrichmentTab'
+import FeedbackTab from '../components/CandidateDetail/FeedbackTab'
+import CommentsTab from '../components/CandidateDetail/CommentsTab'
 
 type Tab = 'breakdown' | 'resume' | 'enrichment' | 'notes' | 'feedback' | 'comments'
 
 const SKILL_CHIP_STYLES: Record<string, string> = {
-  projects:       'bg-[#E1F5EE] text-[#1D9E75] border-[#5DCAA5]/40',
-  experience:     'bg-[#E1F5EE] text-[#1D9E75] border-[#5DCAA5]/40',
-  work_experience:'bg-[#E1F5EE] text-[#1D9E75] border-[#5DCAA5]/40',
+  projects: 'bg-[#E1F5EE] text-[#1D9E75] border-[#5DCAA5]/40',
+  experience: 'bg-[#E1F5EE] text-[#1D9E75] border-[#5DCAA5]/40',
+  work_experience: 'bg-[#E1F5EE] text-[#1D9E75] border-[#5DCAA5]/40',
   skills_section: 'bg-[#EEEDFE] text-[#534AB7] border-[#AFA9EC]/40',
-  skills:         'bg-[#EEEDFE] text-[#534AB7] border-[#AFA9EC]/40',
+  skills: 'bg-[#EEEDFE] text-[#534AB7] border-[#AFA9EC]/40',
   certifications: 'bg-[#EEEDFE] text-[#534AB7] border-[#AFA9EC]/40',
-  education:      'bg-[#E1F5FE] text-[#004D7A] border-[#74C2F1]/40',
-  unknown:        'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600',
+  education: 'bg-[#E1F5FE] text-[#004D7A] border-[#74C2F1]/40',
+  unknown: 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600',
 }
 
 const SKILL_CHIP_LABELS: Record<string, string> = {
-  projects:       'Projects / Experience',
+  projects: 'Projects / Experience',
   skills_section: 'Skills Section',
-  education:      'Education',
-  unknown:        'Other',
-}
-
-const FLAG_SEVERITY_STYLES: Record<string, string> = {
-  high:   'bg-[#FCEBEB] border-[#E24B4A] text-[#791F1F]',
-  medium: 'bg-[#FAEEDA] border-[#EF9F27] text-[#633806]',
-  low:    'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300',
-}
-
-function FlagRow({ flag }: { flag: ConsistencyFlag }) {
-  return (
-    <div className={`rounded-xl border px-4 py-3 text-sm ${FLAG_SEVERITY_STYLES[flag.severity] ?? FLAG_SEVERITY_STYLES.low}`}>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="font-semibold capitalize">{flag.severity}</span>
-        <span className="text-xs opacity-60">{flag.flag_type.replace('_', ' ')}</span>
-      </div>
-      <p>{flag.recruiter_note}</p>
-    </div>
-  )
-}
-
-function GitHubPanel({ summary }: { summary: GitHubSummary }) {
-  const activityColor = summary.activity_score >= 70 ? '#1D9E75' : summary.activity_score >= 40 ? '#EF9F27' : '#E24B4A'
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <div className="text-sm text-gray-500 dark:text-gray-400 shrink-0">Activity</div>
-        <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-          <div className="h-2 rounded-full" style={{ width: `${summary.activity_score}%`, backgroundColor: activityColor }} />
-        </div>
-        <span className="text-sm font-semibold shrink-0" style={{ color: activityColor }}>{summary.activity_score}/100</span>
-      </div>
-
-      <div className="flex gap-4 text-sm text-gray-500 dark:text-gray-400">
-        <span><span className="font-semibold text-gray-800 dark:text-gray-100">{summary.public_repos}</span> repos</span>
-        <span className="font-semibold text-gray-700 dark:text-gray-200">{summary.username}</span>
-      </div>
-
-      {summary.languages.length > 0 && (
-        <div>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">Top Languages</p>
-          <div className="flex flex-wrap gap-1.5">
-            {summary.languages.slice(0, 8).map((l) => (
-              <span key={l.language} className="text-xs px-2.5 py-1 rounded-full border bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-600">
-                {l.language} <span className="text-gray-400">×{l.repo_count}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {summary.relevant_repos.length > 0 && (
-        <div>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">JD-Relevant Repos</p>
-          <div className="space-y-2">
-            {summary.relevant_repos.slice(0, 5).map((r) => (
-              <div key={r.name} className="flex items-start justify-between text-sm">
-                <div>
-                  <span className="font-medium text-gray-800 dark:text-gray-100">{r.name}</span>
-                  {r.description && <span className="text-gray-400 ml-2 text-xs">{r.description.slice(0, 80)}</span>}
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {r.matched_skills.map((s) => (
-                      <span key={s} className="text-xs px-1.5 py-0.5 rounded bg-[#E1F5EE] text-[#085041]">{s}</span>
-                    ))}
-                  </div>
-                </div>
-                {r.stars > 0 && <span className="text-xs text-gray-400 ml-2 shrink-0">★ {r.stars}</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {summary.inferred_skills.length > 0 && (
-        <div>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-1.5">Inferred Skills</p>
-          <div className="flex flex-wrap gap-1.5">
-            {summary.inferred_skills.map((s) => (
-              <span key={s.name} title={`Evidence: ${s.evidence.join(', ')}`}
-                className="text-xs px-2.5 py-1 rounded-full border bg-[#E1F5FE] text-[#004D7A] border-[#74C2F1]">
-                {s.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  education: 'Education',
+  unknown: 'Other',
 }
 
 function ScoreCircle({ score }: { score: number }) {
@@ -174,15 +73,14 @@ export default function CandidateDetail() {
   const queryClient = useQueryClient()
   const evaluationId = Number(id)
 
-  const [activeTab, setActiveTab] = useState<Tab>('breakdown')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = (searchParams.get('tab') as Tab | null) ?? 'breakdown'
   const [noteText, setNoteText] = useState('')
   const [noteStatus, setNoteStatus] = useState<ShortlistStatus>('review')
   const [noteSaved, setNoteSaved] = useState(false)
   const [showEmailModal, setShowEmailModal] = useState(false)
   const [emailSubject, setEmailSubject] = useState('Regarding your application')
   const [emailBody, setEmailBody] = useState('')
-  const [ghUrl, setGhUrl] = useState('')
-  const [liUrl, setLiUrl] = useState('')
   const [localSections, setLocalSections] = useState<ResumeSection[]>([])
   const [sectionsSaved, setSectionsSaved] = useState(false)
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set())
@@ -199,8 +97,6 @@ export default function CandidateDetail() {
     if (!data) return
     if (data.notes) setNoteText(data.notes)
     if (data.shortlist_status) setNoteStatus(data.shortlist_status)
-    if (data.github_url && !ghUrl) setGhUrl(data.github_url)
-    if (data.linkedin_url && !liUrl) setLiUrl(data.linkedin_url)
   }, [data])
 
   const shortlistMut = useMutation({
@@ -233,25 +129,6 @@ export default function CandidateDetail() {
     onError: () => alert('Failed to send rejection email.'),
   })
 
-  const { data: enrichData, refetch: refetchEnrich } = useQuery({
-    queryKey: ['enrichment', data?.candidate_id],
-    queryFn: () => getEnrichment(data!.candidate_id),
-    enabled: !!data?.candidate_id,
-  })
-
-  const ghMut = useMutation({
-    mutationFn: () => enrichGitHub(data!.candidate_id, ghUrl || undefined, data?.job_role_id),
-    onSuccess: () => refetchEnrich(),
-  })
-  const liMut = useMutation({
-    mutationFn: () => enrichLinkedIn(data!.candidate_id, liUrl || undefined),
-    onSuccess: () => refetchEnrich(),
-  })
-  const portfolioMut = useMutation({
-    mutationFn: () => enrichPortfolio(data!.candidate_id),
-    onSuccess: () => refetchEnrich(),
-  })
-
   const [reparseDone, setReparseDone] = useState(false)
   const reparseMut = useMutation({
     mutationFn: () => reparseCandidate(data!.candidate_id),
@@ -264,50 +141,23 @@ export default function CandidateDetail() {
     onError: () => alert('Re-parse failed. The stored resume text may be missing.'),
   })
 
-  // Comments state
-  const [commentText, setCommentText] = useState('')
-  const [editingCommentId, setEditingCommentId] = useState<number | null>(null)
-  const [editingCommentText, setEditingCommentText] = useState('')
-
   useEffect(() => {
     if (data?.resume_sections && localSections.length === 0) {
       setLocalSections(data.resume_sections as ResumeSection[])
     }
   }, [data?.resume_sections])
 
-  const saveSectionsMut = useMutation({
-    mutationFn: () => updateResumeSections(evaluationId, localSections),
+  const reclassifyMut = useMutation({
+    mutationFn: () => reclassifyAndRescore(evaluationId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['resultDetail', evaluationId] })
       setSectionsSaved(true)
-      setTimeout(() => setSectionsSaved(false), 2000)
+      setTimeout(() => {
+        setSectionsSaved(false)
+        setLocalSections([])
+        queryClient.invalidateQueries({ queryKey: ['resultDetail', evaluationId] })
+      }, 2000)
     },
   })
-
-  const { data: commentsList = [], refetch: refetchComments } = useQuery<CandidateComment[]>({
-    queryKey: ['comments', data?.candidate_id],
-    queryFn: () => getComments(data!.candidate_id),
-    enabled: !!data?.candidate_id && activeTab === 'comments',
-  })
-
-  const addCommentMut = useMutation({
-    mutationFn: () => createComment(data!.candidate_id, commentText),
-    onSuccess: () => { setCommentText(''); refetchComments() },
-  })
-
-  const editCommentMut = useMutation({
-    mutationFn: (commentId: number) => updateComment(data!.candidate_id, commentId, editingCommentText),
-    onSuccess: () => { setEditingCommentId(null); setEditingCommentText(''); refetchComments() },
-  })
-
-  const deleteCommentMut = useMutation({
-    mutationFn: (commentId: number) => deleteComment(data!.candidate_id, commentId),
-    onSuccess: () => refetchComments(),
-  })
-
-  function updateSectionType(index: number, newType: string) {
-    setLocalSections((prev) => prev.map((s, i) => i === index ? { ...s, type: newType } : s))
-  }
 
   function toggleSection(index: number) {
     setExpandedSections((prev) => {
@@ -319,51 +169,13 @@ export default function CandidateDetail() {
   }
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'breakdown',  label: 'Score Breakdown' },
-    { key: 'resume',     label: 'Resume Text' },
+    { key: 'breakdown', label: 'Score Breakdown' },
+    { key: 'resume', label: 'Resume Text' },
     { key: 'enrichment', label: 'Enrichment' },
-    { key: 'notes',      label: 'Notes' },
-    { key: 'feedback',   label: 'Interview Feedback' },
-    { key: 'comments',   label: 'Team Comments' },
+    { key: 'notes', label: 'Notes' },
+    { key: 'feedback', label: 'Interview Feedback' },
+    { key: 'comments', label: 'Team Comments' },
   ]
-
-  // ── Interview Feedback ──────────────────────────────────────────
-  const { data: feedbackList = [], refetch: refetchFeedback } = useQuery<InterviewFeedback[]>({
-    queryKey: ['feedback', data?.candidate_id],
-    queryFn: () => getFeedbackForCandidate(data!.candidate_id),
-    enabled: !!data?.candidate_id,
-  })
-  const [fbStage, setFbStage] = useState<'screening' | 'coding' | 'interview'>('interview')
-  const [fbRating, setFbRating] = useState(3)
-  const [fbTech, setFbTech] = useState('')
-  const [fbComm, setFbComm] = useState('')
-  const [fbCulture, setFbCulture] = useState('')
-  const [fbRecommendation, setFbRecommendation] = useState('')
-  const [fbNotes, setFbNotes] = useState('')
-  const [fbSaved, setFbSaved] = useState(false)
-  const addFeedbackMut = useMutation({
-    mutationFn: () => createFeedback({
-      candidate_id: data!.candidate_id,
-      evaluation_id: evaluationId,
-      stage: fbStage,
-      rating: fbRating,
-      technical_score: fbTech ? parseFloat(fbTech) : null,
-      communication_score: fbComm ? parseFloat(fbComm) : null,
-      culture_fit_score: fbCulture ? parseFloat(fbCulture) : null,
-      recommendation: fbRecommendation || null,
-      notes: fbNotes || null,
-    } as FeedbackCreate),
-    onSuccess: () => {
-      setFbNotes(''); setFbTech(''); setFbComm(''); setFbCulture(''); setFbRecommendation(''); setFbRating(3)
-      setFbSaved(true)
-      setTimeout(() => setFbSaved(false), 2000)
-      refetchFeedback()
-    },
-  })
-  const deleteFeedbackMut = useMutation({
-    mutationFn: (id: number) => deleteFeedback(id),
-    onSuccess: () => refetchFeedback(),
-  })
 
   if (isLoading) {
     return (
@@ -412,11 +224,11 @@ export default function CandidateDetail() {
     )
   }
 
-  const foundInProjects   = data.skills_matched?.filter((s) => ['projects','experience','work_experience'].includes(s.best_section)) || []
-  const foundInSkills     = data.skills_matched?.filter((s) => ['skills_section','skills','certifications'].includes(s.best_section)) || []
-  const foundInEducation  = data.skills_matched?.filter((s) => s.best_section === 'education') || []
-  const foundOther        = data.skills_matched?.filter((s) => !['projects','experience','work_experience','skills_section','skills','certifications','education'].includes(s.best_section)) || []
-  const missing           = data.skill_gaps || []
+  const foundInProjects = data.skills_matched?.filter((s) => ['projects', 'experience', 'work_experience'].includes(s.best_section)) || []
+  const foundInSkills = data.skills_matched?.filter((s) => ['skills_section', 'skills', 'certifications'].includes(s.best_section)) || []
+  const foundInEducation = data.skills_matched?.filter((s) => s.best_section === 'education') || []
+  const foundOther = data.skills_matched?.filter((s) => !['projects', 'experience', 'work_experience', 'skills_section', 'skills', 'certifications', 'education'].includes(s.best_section)) || []
+  const missing = data.skill_gaps || []
 
   function SkillChip({ match }: { match: SkillMatch }) {
     return (
@@ -466,11 +278,10 @@ export default function CandidateDetail() {
             {data.email_sent_at && (
               <span
                 title={`Sent ${new Date(data.email_sent_at).toLocaleString()}`}
-                className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                  data.email_opened_at
+                className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${data.email_opened_at
                     ? 'bg-[#E1F5EE] text-[#085041]'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
-                }`}
+                  }`}
               >
                 {data.email_opened_at ? (
                   <>
@@ -523,12 +334,11 @@ export default function CandidateDetail() {
         {TABS.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === tab.key
+            onClick={() => setSearchParams({ tab: tab.key }, { replace: true })}
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.key
                 ? 'border-[#534AB7] text-[#534AB7]'
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-[#534AB7] dark:hover:text-[#AFA9EC]'
-            }`}
+              }`}
           >
             {tab.label}
           </button>
@@ -609,30 +419,30 @@ export default function CandidateDetail() {
                 {data.confidence_tiers && (
                   (data.confidence_tiers.high.length + data.confidence_tiers.medium.length + data.confidence_tiers.low.length) > 0
                 ) && (
-                  <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
-                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Confidence by match quality</p>
-                    <div className="space-y-1.5">
-                      {data.confidence_tiers!.high.length > 0 && (
-                        <div className="flex items-start gap-2">
-                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#E1F5EE] text-[#085041] border border-[#5DCAA5]/50 shrink-0 mt-0.5">High</span>
-                          <p className="text-xs text-gray-600 dark:text-gray-300">{data.confidence_tiers!.high.join(', ')}</p>
-                        </div>
-                      )}
-                      {data.confidence_tiers!.medium.length > 0 && (
-                        <div className="flex items-start gap-2">
-                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#FAEEDA] text-[#633806] border border-[#EF9F27]/50 shrink-0 mt-0.5">Mid</span>
-                          <p className="text-xs text-gray-600 dark:text-gray-300">{data.confidence_tiers!.medium.join(', ')}</p>
-                        </div>
-                      )}
-                      {data.confidence_tiers!.low.length > 0 && (
-                        <div className="flex items-start gap-2">
-                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 shrink-0 mt-0.5">Low</span>
-                          <p className="text-xs text-gray-600 dark:text-gray-300">{data.confidence_tiers!.low.join(', ')}</p>
-                        </div>
-                      )}
+                    <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Confidence by match quality</p>
+                      <div className="space-y-1.5">
+                        {data.confidence_tiers!.high.length > 0 && (
+                          <div className="flex items-start gap-2">
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#E1F5EE] text-[#085041] border border-[#5DCAA5]/50 shrink-0 mt-0.5">High</span>
+                            <p className="text-xs text-gray-600 dark:text-gray-300">{data.confidence_tiers!.high.join(', ')}</p>
+                          </div>
+                        )}
+                        {data.confidence_tiers!.medium.length > 0 && (
+                          <div className="flex items-start gap-2">
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#FAEEDA] text-[#633806] border border-[#EF9F27]/50 shrink-0 mt-0.5">Mid</span>
+                            <p className="text-xs text-gray-600 dark:text-gray-300">{data.confidence_tiers!.medium.join(', ')}</p>
+                          </div>
+                        )}
+                        {data.confidence_tiers!.low.length > 0 && (
+                          <div className="flex items-start gap-2">
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 shrink-0 mt-0.5">Low</span>
+                            <p className="text-xs text-gray-600 dark:text-gray-300">{data.confidence_tiers!.low.join(', ')}</p>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
               </div>
 
               {/* Requirements Breakdown */}
@@ -723,7 +533,7 @@ export default function CandidateDetail() {
                 <div className="space-y-3">
                   {[
                     { label: 'Projects', score: data.project_score },
-                    { label: 'Skills',   score: data.skill_score },
+                    { label: 'Skills', score: data.skill_score },
                     { label: 'Education', score: data.education_score },
                   ].map(({ label, score }) => (
                     <div key={label}>
@@ -797,14 +607,14 @@ export default function CandidateDetail() {
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold text-gray-800 dark:text-gray-100">Resume Sections</h3>
                   <div className="flex items-center gap-3">
-                    {sectionsSaved && <span className="text-xs text-[#1D9E75] font-medium">Saved</span>}
-                    {saveSectionsMut.isError && <span className="text-xs text-[#791F1F]">Save failed</span>}
+                    {sectionsSaved && <span className="text-xs text-[#1D9E75] font-medium">Re-scoring started…</span>}
+                    {reclassifyMut.isError && <span className="text-xs text-[#791F1F]">Failed</span>}
                     <button
-                      onClick={() => saveSectionsMut.mutate()}
-                      disabled={saveSectionsMut.isPending}
+                      onClick={() => reclassifyMut.mutate()}
+                      disabled={reclassifyMut.isPending}
                       className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white text-sm font-medium rounded-lg px-4 py-1.5 transition-colors"
                     >
-                      {saveSectionsMut.isPending ? 'Saving…' : 'Save Section Types'}
+                      {reclassifyMut.isPending ? 'Re-classifying…' : 'Re-classify & Re-score'}
                     </button>
                   </div>
                 </div>
@@ -846,20 +656,6 @@ export default function CandidateDetail() {
                             </div>
                             <span className="text-[10px] text-gray-400 dark:text-gray-500 w-7 text-right">{confPct}%</span>
                           </div>
-                          {/* Type editor */}
-                          <select
-                            value={sec.type}
-                            onChange={(e) => updateSectionType(idx, e.target.value)}
-                            className="text-xs border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
-                          >
-                            {[
-                              'projects','work_experience','skills_section','education',
-                              'certifications','summary','objective','awards',
-                              'publications','volunteer','languages','interests','unknown',
-                            ].map((t) => (
-                              <option key={t} value={t}>{t.replace('_', ' ')}</option>
-                            ))}
-                          </select>
                           {/* Expand toggle */}
                           <button
                             onClick={() => toggleSection(idx)}
@@ -891,165 +687,16 @@ export default function CandidateDetail() {
         )}
 
         {/* Tab 3: Enrichment */}
-        {activeTab === 'enrichment' && (
-          <div className="p-6 space-y-5 max-w-3xl">
-            {enrichData?.needs_manual_review && (
-              <div className="flex items-center gap-3 bg-[#FCEBEB] border border-[#E24B4A] rounded-xl px-4 py-3 text-sm text-[#791F1F]">
-                <span className="font-semibold">Manual review required</span>
-                <span>— discrepancies detected between resume and LinkedIn.</span>
-              </div>
-            )}
-
-            {/* GitHub */}
-            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-gray-800 dark:text-gray-100">GitHub Analysis</h3>
-                {enrichData?.enrichment_sources?.includes('github') && (
-                  <span className="text-xs bg-[#E1F5EE] text-[#085041] border border-[#5DCAA5] px-2 py-0.5 rounded-full">Enriched</span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <input type="text"
-                  className="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
-                  placeholder={enrichData?.github_url ?? 'github.com/username'}
-                  value={ghUrl}
-                  onChange={(e) => setGhUrl(e.target.value)}
-                />
-                <button onClick={() => ghMut.mutate()} disabled={ghMut.isPending}
-                  className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white text-sm font-medium rounded-lg px-4 py-1.5 transition-colors">
-                  {ghMut.isPending ? 'Analyzing…' : 'Analyze'}
-                </button>
-              </div>
-              {ghMut.isError && <p className="text-xs text-[#791F1F]">Failed: {(ghMut.error as any)?.response?.data?.detail ?? 'Unknown error'}</p>}
-              {enrichData?.github_summary && !enrichData.github_summary.error && (
-                <GitHubPanel summary={enrichData.github_summary} />
-              )}
-              {enrichData?.github_summary?.error && (
-                <p className="text-xs text-gray-400 dark:text-gray-500">{enrichData.github_summary.error}</p>
-              )}
-            </div>
-
-            {/* LinkedIn */}
-            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-gray-800 dark:text-gray-100">LinkedIn Enrichment</h3>
-                {enrichData?.enrichment_sources?.includes('linkedin') && (
-                  <span className="text-xs bg-[#EEEDFE] text-[#3C3489] border border-[#AFA9EC] px-2 py-0.5 rounded-full">Enriched</span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <input type="text"
-                  className="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
-                  placeholder={enrichData?.linkedin_url ?? 'linkedin.com/in/username'}
-                  value={liUrl}
-                  onChange={(e) => setLiUrl(e.target.value)}
-                />
-                <button onClick={() => liMut.mutate()} disabled={liMut.isPending}
-                  className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white text-sm font-medium rounded-lg px-4 py-1.5 transition-colors">
-                  {liMut.isPending ? 'Enriching…' : 'Enrich'}
-                </button>
-              </div>
-              {liMut.isError && <p className="text-xs text-[#791F1F]">Failed: {(liMut.error as any)?.response?.data?.detail ?? 'Unknown error'}</p>}
-              {/* Graceful degradation: LinkedIn blocks automated scraping */}
-              {(liMut.data?.error || (enrichData?.enrichment_sources?.includes('linkedin') && !enrichData?.linkedin_data)) && (
-                <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-3 py-2.5 text-xs text-amber-800 dark:text-amber-200">
-                  <svg className="w-4 h-4 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
-                  <div>
-                    <p className="font-medium">LinkedIn access restricted</p>
-                    <p className="opacity-80 mt-0.5">LinkedIn blocks automated profile access. The URL has been saved — review the profile manually.</p>
-                    {(enrichData?.linkedin_url || liUrl) && (
-                      <a href={enrichData?.linkedin_url || liUrl} target="_blank" rel="noopener noreferrer"
-                        className="underline opacity-80 hover:opacity-100 mt-1 block">
-                        Open profile →
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
-              {enrichData?.linkedin_data && (
-                <div>
-                  {((enrichData.linkedin_data as any).linkedin_skills ?? []).length > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mb-1.5">LinkedIn Skills</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {((enrichData.linkedin_data as any).linkedin_skills as string[]).map((s) => (
-                          <span key={s} className="text-xs px-2.5 py-1 rounded-full border bg-[#EEEDFE] text-[#3C3489] border-[#AFA9EC]">{s}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Portfolio Analysis */}
-            {data.portfolio_url && (
-              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-800 dark:text-gray-100">Portfolio Analysis</h3>
-                  {enrichData?.enrichment_sources?.includes('portfolio') && (
-                    <span className="text-xs bg-[#E1F5EE] text-[#085041] border border-[#5DCAA5] px-2 py-0.5 rounded-full">Analysed</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
-                  <a href={data.portfolio_url} target="_blank" rel="noopener noreferrer"
-                    className="text-sm text-[#534AB7] hover:underline truncate flex-1">{data.portfolio_url}</a>
-                  <button onClick={() => portfolioMut.mutate()} disabled={portfolioMut.isPending}
-                    className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white text-sm font-medium rounded-lg px-4 py-1.5 transition-colors shrink-0">
-                    {portfolioMut.isPending ? 'Analysing…' : 'Analyse'}
-                  </button>
-                </div>
-                {portfolioMut.isError && <p className="text-xs text-[#791F1F]">Analysis failed</p>}
-                {enrichData?.portfolio_summary && (() => {
-                  const ps = enrichData.portfolio_summary as PortfolioSummary
-                  return (
-                    <div className="space-y-3">
-                      {ps.title && <p className="text-sm font-medium text-gray-800 dark:text-gray-100">{ps.title}</p>}
-                      {ps.description && <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{ps.description}</p>}
-                      {ps.tech_stack.length > 0 && (
-                        <div>
-                          <p className="text-xs text-gray-400 dark:text-gray-500 mb-1.5">Detected Tech Stack</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {ps.tech_stack.map((t) => (
-                              <span key={t} className="text-xs px-2.5 py-1 rounded-full border bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]/50">{t}</span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {ps.project_snippets.length > 0 && (
-                        <div>
-                          <p className="text-xs text-gray-400 dark:text-gray-500 mb-1.5">Project Sections</p>
-                          <ul className="space-y-1">
-                            {ps.project_snippets.map((s, i) => (
-                              <li key={i} className="text-xs text-gray-600 dark:text-gray-300 flex items-start gap-1.5">
-                                <span className="text-gray-300 dark:text-gray-600 shrink-0 mt-0.5">›</span>{s}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {ps.error && (
-                        <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded px-2 py-1">{ps.error}</p>
-                      )}
-                    </div>
-                  )
-                })()}
-              </div>
-            )}
-
-            {/* Consistency flags */}
-            {(enrichData?.consistency_flags ?? []).length > 0 && (
-              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 space-y-3">
-                <h3 className="font-semibold text-gray-800 dark:text-gray-100">Review Flags</h3>
-                {(enrichData!.consistency_flags as ConsistencyFlag[]).map((flag, i) => (
-                  <FlagRow key={i} flag={flag} />
-                ))}
-              </div>
-            )}
-          </div>
+        {activeTab === 'enrichment' && data && (
+          <EnrichmentTab
+            candidateId={data.candidate_id}
+            jobRoleId={data.job_role_id}
+            portfolioUrl={data.portfolio_url}
+            initialGhUrl={data.github_url ?? undefined}
+            initialLiUrl={data.linkedin_url ?? undefined}
+          />
         )}
+
 
         {/* Tab 4: Notes */}
         {activeTab === 'notes' && (
@@ -1093,243 +740,15 @@ export default function CandidateDetail() {
         )}
       </div>
 
-        {/* Tab 5: Interview Feedback */}
-        {activeTab === 'feedback' && (
-          <div className="p-6 space-y-6 max-w-2xl">
+      {/* Tab 5: Interview Feedback */}
+      {activeTab === 'feedback' && data && (
+        <FeedbackTab candidateId={data.candidate_id} evaluationId={evaluationId} />
+      )}
 
-            {/* Summary panel */}
-            {feedbackList.length > 0 && (() => {
-              const avg = (arr: (number | null)[]) => {
-                const vals = arr.filter((v): v is number => v != null)
-                return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : null
-              }
-              const avgRating = avg(feedbackList.map((f) => f.rating))
-              const avgTech = avg(feedbackList.map((f) => f.technical_score))
-              const avgComm = avg(feedbackList.map((f) => f.communication_score))
-              const avgCulture = avg(feedbackList.map((f) => f.culture_fit_score))
-              const recCounts: Record<string, number> = {}
-              feedbackList.forEach((f) => { if (f.recommendation) recCounts[f.recommendation] = (recCounts[f.recommendation] ?? 0) + 1 })
-              const REC_STYLES: Record<string, string> = {
-                strong_hire: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
-                hire: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-                no_hire: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
-                strong_no_hire: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-              }
-              return (
-                <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-                  <h3 className="font-semibold text-gray-800 dark:text-gray-100 text-sm mb-3">
-                    Aggregate Scores <span className="font-normal text-gray-400">({feedbackList.length} response{feedbackList.length !== 1 ? 's' : ''})</span>
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-                    {[
-                      { label: 'Avg Rating', value: avgRating != null ? `${avgRating.toFixed(1)} / 5` : '—', color: '#534AB7' },
-                      { label: 'Technical', value: avgTech != null ? `${avgTech.toFixed(1)} / 10` : '—', color: '#1D9E75' },
-                      { label: 'Communication', value: avgComm != null ? `${avgComm.toFixed(1)} / 10` : '—', color: '#EF9F27' },
-                      { label: 'Culture Fit', value: avgCulture != null ? `${avgCulture.toFixed(1)} / 10` : '—', color: '#3B82F6' },
-                    ].map(({ label, value, color }) => (
-                      <div key={label} className="text-center">
-                        <p className="text-[10px] text-gray-400 mb-0.5">{label}</p>
-                        <p className="text-base font-bold" style={{ color }}>{value}</p>
-                      </div>
-                    ))}
-                  </div>
-                  {Object.keys(recCounts).length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(recCounts).map(([rec, count]) => (
-                        <span key={rec} className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${REC_STYLES[rec] ?? 'bg-gray-100 text-gray-600'}`}>
-                          {rec.replace('_', ' ')} × {count}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-
-            {/* Existing feedback entries */}
-            {feedbackList.length > 0 && (
-              <div className="space-y-3">
-                <h3 className="font-semibold text-gray-800 dark:text-gray-100 text-sm">Previous Feedback</h3>
-                {feedbackList.map((fb) => (
-                  <div key={fb.id} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="capitalize text-xs font-semibold bg-[#EEEDFE] dark:bg-[#2d2a5a] text-[#534AB7] px-2 py-0.5 rounded-full">{fb.stage}</span>
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{'★'.repeat(fb.rating)}{'☆'.repeat(5 - fb.rating)}</span>
-                        {fb.recommendation && (
-                          <span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${
-                            fb.recommendation === 'strong_hire' ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' :
-                            fb.recommendation === 'hire' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' :
-                            fb.recommendation === 'no_hire' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' :
-                            'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                          }`}>{fb.recommendation.replace('_', ' ')}</span>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => deleteFeedbackMut.mutate(fb.id)}
-                        className="text-xs text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors"
-                        title="Delete"
-                      >✕</button>
-                    </div>
-                    {(fb.technical_score != null || fb.communication_score != null || fb.culture_fit_score != null) && (
-                      <div className="flex gap-4 text-xs text-gray-500 dark:text-gray-400">
-                        {fb.technical_score != null && <span>Tech <strong>{fb.technical_score}/10</strong></span>}
-                        {fb.communication_score != null && <span>Comm <strong>{fb.communication_score}/10</strong></span>}
-                        {fb.culture_fit_score != null && <span>Culture <strong>{fb.culture_fit_score}/10</strong></span>}
-                      </div>
-                    )}
-                    {fb.notes && <p className="text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap">{fb.notes}</p>}
-                    <p className="text-xs text-gray-400 dark:text-gray-500">{fb.interviewer_email ?? 'Unknown'} · {new Date(fb.created_at).toLocaleDateString()}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Add feedback form */}
-            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 space-y-4">
-              <h3 className="font-semibold text-gray-800 dark:text-gray-100">Add Interview Feedback</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Stage</label>
-                  <select value={fbStage} onChange={(e) => setFbStage(e.target.value as typeof fbStage)}
-                    className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40">
-                    <option value="screening">Screening</option>
-                    <option value="coding">Coding</option>
-                    <option value="interview">Interview</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Overall Rating</label>
-                  <select value={fbRating} onChange={(e) => setFbRating(Number(e.target.value))}
-                    className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40">
-                    {[1,2,3,4,5].map((n) => <option key={n} value={n}>{n} Star{n !== 1 ? 's' : ''}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {[['Technical', fbTech, setFbTech], ['Communication', fbComm, setFbComm], ['Culture Fit', fbCulture, setFbCulture]].map(([label, val, setter]) => (
-                  <div key={label as string}>
-                    <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">{label as string} (0–10)</label>
-                    <input type="number" min={0} max={10} step={0.5}
-                      value={val as string}
-                      onChange={(e) => (setter as (v: string) => void)(e.target.value)}
-                      placeholder="—"
-                      className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40" />
-                  </div>
-                ))}
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Recommendation</label>
-                <select value={fbRecommendation} onChange={(e) => setFbRecommendation(e.target.value)}
-                  className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40">
-                  <option value="">— Select —</option>
-                  <option value="strong_hire">Strong Hire</option>
-                  <option value="hire">Hire</option>
-                  <option value="no_hire">No Hire</option>
-                  <option value="strong_no_hire">Strong No Hire</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Notes</label>
-                <textarea rows={4} value={fbNotes} onChange={(e) => setFbNotes(e.target.value)}
-                  placeholder="Observations, strengths, concerns…"
-                  className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 resize-none" />
-              </div>
-              <div className="flex items-center gap-3">
-                <button onClick={() => addFeedbackMut.mutate()} disabled={addFeedbackMut.isPending}
-                  className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white font-semibold rounded-lg px-5 py-2 text-sm transition-colors">
-                  {addFeedbackMut.isPending ? 'Saving…' : 'Save Feedback'}
-                </button>
-                {fbSaved && <span className="text-xs text-[#1D9E75] font-medium">Saved</span>}
-                {addFeedbackMut.isError && <span className="text-xs text-red-500">Save failed</span>}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 6: Team Comments */}
-        {activeTab === 'comments' && (
-          <div className="p-6 max-w-2xl space-y-4">
-            {/* Existing comments */}
-            {commentsList.length === 0 && (
-              <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-8">No comments yet. Be the first to add one.</p>
-            )}
-            <div className="space-y-3">
-              {commentsList.map((comment: CandidateComment) => (
-                <div key={comment.id} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-[#534AB7]/20 flex items-center justify-center text-[#534AB7] text-xs font-bold">
-                        {(comment.author_email ?? '?')[0].toUpperCase()}
-                      </div>
-                      <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{comment.author_email ?? 'Unknown'}</span>
-                      <span className="text-xs text-gray-400 dark:text-gray-500">
-                        {new Date(comment.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                        {comment.updated_at && <span className="ml-1 italic">(edited)</span>}
-                      </span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => { setEditingCommentId(comment.id); setEditingCommentText(comment.body) }}
-                        className="text-xs text-gray-300 dark:text-gray-600 hover:text-[#534AB7] dark:hover:text-[#AFA9EC] transition-colors"
-                      >Edit</button>
-                      <button
-                        onClick={() => deleteCommentMut.mutate(comment.id)}
-                        className="text-xs text-gray-300 dark:text-gray-600 hover:text-[#E24B4A] transition-colors"
-                      >Delete</button>
-                    </div>
-                  </div>
-                  {editingCommentId === comment.id ? (
-                    <div className="space-y-2">
-                      <textarea
-                        rows={3}
-                        value={editingCommentText}
-                        onChange={(e) => setEditingCommentText(e.target.value)}
-                        className="w-full border border-[#534AB7] rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 resize-none"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => editCommentMut.mutate(comment.id)}
-                          disabled={editCommentMut.isPending || !editingCommentText.trim()}
-                          className="text-xs bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white rounded-lg px-3 py-1.5 transition-colors"
-                        >
-                          {editCommentMut.isPending ? 'Saving…' : 'Save'}
-                        </button>
-                        <button
-                          onClick={() => { setEditingCommentId(null); setEditingCommentText('') }}
-                          className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-3 py-1.5 transition-colors"
-                        >Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{comment.body}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* New comment form */}
-            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-              <textarea
-                rows={3}
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Add a comment visible to all team members…"
-                className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 resize-none"
-              />
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => addCommentMut.mutate()}
-                  disabled={addCommentMut.isPending || !commentText.trim()}
-                  className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors"
-                >
-                  {addCommentMut.isPending ? 'Posting…' : 'Post Comment'}
-                </button>
-                {addCommentMut.isError && <span className="text-xs text-red-500">Failed to post comment</span>}
-              </div>
-            </div>
-          </div>
-        )}
+      {/* Tab 6: Team Comments */}
+      {activeTab === 'comments' && data && (
+        <CommentsTab candidateId={data.candidate_id} />
+      )}
 
       {/* ── Email Modal ─────────────────────────────────────────── */}
       {showEmailModal && (

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { getResults, deleteResult, deleteAllResults, getJobRoles, setIntakePause, autoApplyShortlist, bulkShortlist, bulkDelete, sendNextStepsEmail, updateCandidateStage, bulkSendNextSteps, downloadResultsCsv, reclassifyExperienceLevels } from '../api/client'
+import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/react-query'
+import { getResults, deleteResult, deleteAllResults, getJobRoles, setIntakePause, autoApplyShortlist, bulkShortlist, bulkDelete, sendNextStepsEmail, updateCandidateStage, bulkSendNextSteps, downloadResultsCsv, reclassifyExperienceLevels, getResultsSummary, pauseEvaluation, resumeEvaluation, getEvaluationStatus } from '../api/client'
 import type { CandidateResult, CandidateStage, JobRole, ShortlistStatus } from '../api/client'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
@@ -172,7 +172,25 @@ export default function Leaderboard() {
       }),
     enabled: true,
     staleTime: 0,
-    refetchInterval: 5000,
+    refetchInterval: 3000,
+  })
+
+  // Summary stats — pulled from backend over ALL pages, not just current 50
+  const { data: summary, isFetching: summaryFetching } = useQuery({
+    queryKey: ['results-summary', selectedJobRoleId],
+    queryFn: () => getResultsSummary(selectedJobRoleId ?? undefined),
+    staleTime: 0,
+    refetchInterval: 2000,
+    placeholderData: keepPreviousData,
+  })
+
+  // Evaluation progress — for pause/resume controls
+  const { data: evalStatus } = useQuery({
+    queryKey: ['eval-status', selectedJobRoleId],
+    queryFn: () => getEvaluationStatus(selectedJobRoleId!),
+    enabled: !!selectedJobRoleId,
+    staleTime: 0,
+    refetchInterval: 3000,
   })
 
   const { data: jobRoles } = useQuery({
@@ -256,6 +274,22 @@ export default function Leaderboard() {
       setTimeout(() => setReclassifyMsg(null), 5000)
     },
     onError: () => { setReclassifyMsg('Reclassification failed'); setTimeout(() => setReclassifyMsg(null), 4000) },
+  })
+
+  const pauseMut = useMutation({
+    mutationFn: () => pauseEvaluation(selectedJobRoleId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['eval-status', selectedJobRoleId] })
+    },
+  })
+
+  const resumeMut = useMutation({
+    mutationFn: () => resumeEvaluation(selectedJobRoleId!),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['eval-status', selectedJobRoleId] })
+      queryClient.invalidateQueries({ queryKey: ['results-summary', selectedJobRoleId] })
+      if (res.queued_count === 0) alert('No queued evaluations to resume.')
+    },
   })
 
   const STAGE_COLORS: Record<CandidateStage, string> = {
@@ -384,17 +418,15 @@ export default function Leaderboard() {
     return arr
   }, [baseItems, sortKey, sortDir])
 
-  // Metric cards
-  const totalEvaluated = data?.total ?? items.length
+  // Metric cards — use backend summary so values are stable across pages/filters
+  const totalEvaluated = summary?.total ?? data?.total ?? items.length
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
-  const avgScore =
-    items.length > 0
-      ? Math.round(items.reduce((acc, r) => acc + r.total_score, 0) / items.length)
-      : 0
-  const shortlisted = items.filter((r) => r.status === 'shortlisted').length
-  const needsReview = items.filter((r) => r.needs_manual_review).length
-  const tfidfFiltered = items.filter((r) => r.filter_stage === 'tfidf_filtered').length
-  const experienceFiltered = items.filter((r) => r.filter_stage === 'experience_filtered').length
+  const avgScore = summary ? Math.round(summary.avg_score) : null
+  const shortlisted = summary?.shortlisted ?? 0
+  const needsReview = summary?.needs_review ?? 0
+  const tfidfFiltered = summary?.tfidf_filtered ?? 0
+  const experienceFiltered = summary?.experience_filtered ?? 0
+  const queuedCount = summary?.queued ?? 0
 
   function exportCSV() {
     const csv = resultsToCSV(items)
@@ -446,23 +478,28 @@ export default function Leaderboard() {
       {/* Metric Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
-          { label: 'Total Evaluated', value: totalEvaluated, color: '#534AB7', bg: '#EEEDFE' },
-          { label: 'Avg Score', value: `${avgScore}`, color: '#1D9E75', bg: '#E1F5EE' },
-          { label: 'Shortlisted', value: shortlisted, color: '#EF9F27', bg: '#FAEEDA' },
-          { label: 'Needs Review', value: needsReview, color: '#E24B4A', bg: '#FCEBEB' },
-          ...(tfidfFiltered > 0 ? [{ label: 'Keyword filtered', value: tfidfFiltered, color: '#6B7280', bg: '#F3F4F6' }] : []),
-          ...(experienceFiltered > 0 ? [{ label: 'Exp. mismatch', value: experienceFiltered, color: '#EA580C', bg: '#FFF7ED' }] : []),
-        ].map(({ label, value, color, bg }) => (
+          { label: 'Total Evaluated', value: totalEvaluated, color: '#534AB7', bg: '#EEEDFE', fromSummary: false },
+          { label: 'Avg Score', value: avgScore !== null ? `${avgScore}` : null, color: '#1D9E75', bg: '#E1F5EE', fromSummary: true },
+          { label: 'Shortlisted', value: summary ? shortlisted : null, color: '#EF9F27', bg: '#FAEEDA', fromSummary: true },
+          { label: 'Needs Review', value: summary ? needsReview : null, color: '#E24B4A', bg: '#FCEBEB', fromSummary: true },
+          { label: 'Keyword Filtered', value: summary ? tfidfFiltered : null, color: '#6B7280', bg: '#F3F4F6', fromSummary: true },
+          { label: 'Exp. Mismatch', value: summary ? experienceFiltered : null, color: '#EA580C', bg: '#FFF7ED', fromSummary: true },
+        ].map(({ label, value, color, bg, fromSummary }) => (
           <div
             key={label}
             className="rounded-xl border p-4"
             style={{ backgroundColor: bg, borderColor: color + '40' }}
           >
-            <p className="text-xs font-medium mb-1" style={{ color }}>
-              {label}
-            </p>
+            <div className="flex items-center gap-1.5 mb-1">
+              <p className="text-xs font-medium" style={{ color }}>{label}</p>
+              {fromSummary && summaryFetching && (
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
+              )}
+            </div>
             <p className="text-2xl font-bold" style={{ color }}>
-              {value}
+              {value === null ? (
+                <span className="text-base opacity-40">—</span>
+              ) : value}
             </p>
           </div>
         ))}
@@ -637,6 +674,30 @@ export default function Leaderboard() {
           </svg>
           Refresh
         </button>
+
+        {/* Pause / Resume — media-player style toggle, always Pause or Resume */}
+        {selectedJobRoleId != null && (
+          <button
+            onClick={() => evalStatus?.in_progress ? pauseMut.mutate() : resumeMut.mutate()}
+            disabled={pauseMut.isPending || resumeMut.isPending}
+            title={
+              evalStatus?.in_progress
+                ? 'Pause evaluation — queued resumes stay held'
+                : `Resume evaluation${queuedCount > 0 ? ` — ${queuedCount} queued` : ''}`
+            }
+            className={`rounded-lg px-3 py-2 text-sm flex items-center gap-2 transition-colors disabled:opacity-50 ${
+              evalStatus?.in_progress
+                ? 'border border-amber-400 text-amber-600 dark:text-amber-400 dark:border-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                : 'border border-[#1D9E75] text-[#1D9E75] dark:border-[#1D9E75] hover:bg-[#E1F5EE] dark:hover:bg-[#0a3329]'
+            }`}
+          >
+            <span className={`inline-block w-2 h-2 rounded-full ${evalStatus?.in_progress ? 'bg-amber-400 animate-pulse' : 'bg-[#1D9E75]'}`} />
+            {evalStatus?.in_progress
+              ? (pauseMut.isPending ? 'Pausing…' : 'Pause')
+              : (resumeMut.isPending ? 'Resuming…' : 'Resume')
+            }
+          </button>
+        )}
 
         {isAdmin && (
           <button
@@ -879,6 +940,25 @@ export default function Leaderboard() {
                                 className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]"
                               >
                                 ⚠ Review
+                              </span>
+                            )}
+                            {!blindMode && item.github_skill_gap_severity && item.github_skill_gap_severity !== 'low' && (
+                              <span
+                                title={
+                                  item.github_skill_gap_severity === 'high'
+                                    ? 'GitHub: claimed skills not evidenced in repositories (high concern)'
+                                    : 'GitHub: some claimed skills unverified in repositories'
+                                }
+                                className={`inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                                  item.github_skill_gap_severity === 'high'
+                                    ? 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]'
+                                    : 'bg-[#FAEEDA] text-[#633806] border-[#EF9F27]'
+                                }`}
+                              >
+                                <svg className="w-2.5 h-2.5" viewBox="0 0 16 16" fill="currentColor">
+                                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                                </svg>
+                                {item.github_skill_gap_severity === 'high' ? 'GH ✗' : 'GH ~'}
                               </span>
                             )}
                           </div>

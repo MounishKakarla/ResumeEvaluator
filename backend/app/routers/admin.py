@@ -825,10 +825,15 @@ def reclassify_experience_levels(
             return "senior"
         return "executive"
 
+    current_year = datetime.now().year
     candidates = db.query(Candidate).all()
     updated = 0
     for c in candidates:
-        if c.years_experience is not None:
+        # Graduation year override: fresh grads (graduating this year or last) are always entry-level
+        grad_year = getattr(c, "graduation_year", None)
+        if grad_year and grad_year >= current_year - 1:
+            new_level = "entry"
+        elif c.years_experience is not None:
             new_level = _level_from_years(float(c.years_experience))
         else:
             # Fallback: infer from current title text only

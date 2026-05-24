@@ -5,7 +5,8 @@ Pipeline per resume:
 2. TF-IDF Vectorization — ngram_range=(1,3) captures unigrams, bigrams, trigrams
 3. Cosine Similarity — sklearn pairwise cosine between skill queries and section vectors
 4. N-gram phrase detection — common tech phrases matched before vectorization
-5. Weighted scoring — project section (50%), skills section (30%), education (20%)
+5. Coverage ratio scoring — sum(matched_scores) / total_required_skills (not mean of matched only)
+   Default weights: projects/experience (45%), skills coverage (35%), education (20%)
 """
 
 from __future__ import annotations
@@ -91,6 +92,72 @@ def _section_recency_factor(text: str) -> float:
     return 0.55
 
 
+# ---------------------------------------------------------------------------
+# Semantic project complexity analysis
+# ---------------------------------------------------------------------------
+
+_PRODUCTION_SIGNALS_RE = re.compile(
+    r'\b(deploy(?:ed|ment|ing)?|docker|kubernetes|k8s|aws|gcp|azure|heroku|vercel|netlify|'
+    r'ci[/\-]?cd|github\s+actions|jenkins|travis|circleci|stripe|twilio|sendgrid|firebase|'
+    r'supabase|payment\s+gateway|oauth|jwt|redis|elasticsearch|kafka|'
+    r'microservice|rest\s*api|graphql|production|live\s+(?:site|app|system)|real\s+users|'
+    r'open[\s-]?source|npm\s+publish|pypi|load\s+test|monitoring|prometheus|grafana|sentry|'
+    r'1[0-9]{3,}\s*(?:users|requests|records)|revenue|paid\s+(?:users|customers))\b',
+    re.I,
+)
+
+_ACADEMIC_SIGNALS_RE = re.compile(
+    r'\b(university\s+project|college\s+project|coursework|class\s+project|course\s+project|'
+    r'academic\s+project|assignment|lab\s+(?:project|work)|semester\s+project|'
+    r'final[\s-]?year\s+project|capstone|guided\s+by|under\s+(?:the\s+)?(?:guidance|supervision)|'
+    r'mini[\s-]?project|toy\s+project|sample\s+app|demo\s+(?:app|project)|'
+    r'following\s+(?:the\s+)?tutorial|learning\s+project|practice\s+project)\b',
+    re.I,
+)
+
+# Architecture & design action-verbs signal deliberate engineering thinking.
+# Used only for entry-level/fresher candidates who describe their projects with
+# conceptual depth even without production deployment keywords.
+_DESIGN_VERB_RE = re.compile(
+    r'\b(designed?|architected?|engineer(?:ed|ing)?|built|constructed?|'
+    r'optimized?|improv(?:ed|ing)|reduced?|integrated?|automated?|'
+    r'streamlined?|formulated?|established?|solved?|leveraged?|'
+    r'developed?|created?|implement(?:ed|ing)?)\b',
+    re.I,
+)
+
+
+def _project_complexity_score(text: str, is_fresher: bool = False) -> float:
+    """Return a 0.70–1.25 multiplier reflecting project sophistication.
+
+    Production-grade signals (deployed, Docker, live users, Stripe, CI/CD) boost
+    the score; academic/guided-coursework signals reduce it.
+    For entry-level candidates, architecture/design action-verbs add up to +15%
+    to reward conceptual depth even when production keywords are absent.
+    """
+    prod_hits = len(_PRODUCTION_SIGNALS_RE.findall(text))
+    acad_hits = len(_ACADEMIC_SIGNALS_RE.findall(text))
+
+    if prod_hits >= 3:
+        result = 1.25       # clearly production-grade
+    elif prod_hits >= 1 and acad_hits == 0:
+        result = 1.10       # production signals, no academic flags
+    elif acad_hits >= 2 and prod_hits == 0:
+        result = 0.70       # clearly guided coursework
+    elif acad_hits >= 1 and prod_hits == 0:
+        result = 0.80       # mild academic signal
+    else:
+        result = 1.0        # neutral
+
+    # Entry-level only: writing design-oriented descriptions (e.g. "Architected a
+    # RAG pipeline", "Optimized query latency") signals conceptual depth that
+    # freshers typically can't demonstrate via production deployment signals.
+    if is_fresher and _DESIGN_VERB_RE.search(text):
+        result = min(result * 1.15, 1.25)
+
+    return result
+
+
 # Per-section base reliability scores for keyword matching.
 # Reflects how much to trust a skill found in each section type.
 _SECTION_BASE_SCORES: dict[str, float] = {
@@ -135,6 +202,7 @@ class ScoreResult:
     project_score: float
     skill_score: float
     education_score: float
+    experience_score: float = 0.0   # 0-100: how well candidate yrs match role requirement
     skills_matched: List[SkillMatchDetail] = field(default_factory=list)
     skill_gaps: List[str] = field(default_factory=list)
     top_excerpt: Optional[str] = None
@@ -298,7 +366,8 @@ def _major_match_score(edu_text: str, preferred_majors: List[str]) -> float:
         if parts:
             hits = sum(1 for p in parts if p in edu_lower)
             best = max(best, hits / len(parts))
-    return max(best * 0.7, 0.8)  # floor of 0.8 — don't heavily penalise major mismatch
+    # Partial credit for keyword overlap; floor 0.5 so a completely wrong major still shows some penalty
+    return max(best * 0.9, 0.5)
 
 
 def _score_education(
@@ -311,6 +380,28 @@ def _score_education(
     level = _education_level_score(edu_text, min_degree)
     major = _major_match_score(edu_text, preferred_majors or [])
     return base * level * major
+
+
+def _score_experience_match(candidate_years: float, required_years: int) -> float:
+    """Return 0–1 score comparing candidate's total experience to the role's minimum.
+
+    Tiers are intentionally forgiving: experience is a signal, not a hard gate
+    (the Stage-0 filter handles hard cutoffs).
+      ≥ required          → 1.00
+      ≥ 75 % of required  → 0.80
+      ≥ 50 % of required  → 0.55
+      < 50 %              → 0.20
+    """
+    if required_years <= 0:
+        return 1.0
+    ratio = candidate_years / max(required_years, 1)
+    if ratio >= 1.0:
+        return 1.0
+    if ratio >= 0.75:
+        return 0.80
+    if ratio >= 0.50:
+        return 0.55
+    return 0.20
 
 
 def _extract_skill_experience_years(skill_name: str, text: str) -> Optional[float]:
@@ -383,18 +474,36 @@ def _build_result_from_llm(
     jd_description: Optional[str] = None,
     min_degree: Optional[str] = None,
     preferred_majors: Optional[List[str]] = None,
+    skill_name_to_required: Optional[dict] = None,
+    candidate_years: Optional[float] = None,
+    min_experience_years: int = 0,
+    is_fresher: bool = False,
 ) -> ScoreResult:
     """Convert raw LLM skill dicts into a ScoreResult."""
     _CONF_MAP = {"high": 1.2, "medium": 1.0, "low": 0.75}
-    # LLM scores (0-100 semantic scale) need a lower threshold than TF-IDF cosine similarity.
-    # A score of 40 means the skill is meaningfully present; TF-IDF 0.70 would be far too strict.
-    _THRESHOLD_INT = 40
+    # 55 = "skill clearly used in project/experience" — excludes "implied but not named" (25-54).
+    # Raising from 40 prevents indirectly implied skills from inflating the coverage ratio.
+    _THRESHOLD_INT = 55
 
     skills_matched: List[SkillMatchDetail] = []
     skill_gaps: List[str] = []
     project_scores: List[float] = []
     skill_scores: List[float] = []
     all_excerpts: List[Tuple[float, str]] = []
+
+    # Weighted denominator: required skills count 1.5×, nice-to-have 0.7×
+    total_weight = sum(
+        1.5 if (skill_name_to_required.get(item.get("name", ""), True) if skill_name_to_required else True) else 0.7
+        for item in llm_skills
+    ) or 1.0
+
+    # Pre-compute max complexity per section type for the LLM path
+    _llm_proj_types = {"projects", "experience", "work_experience"}
+    _type_complexity: dict = {}
+    for _s in sections:
+        if _s.type in _llm_proj_types:
+            _existing = _type_complexity.get(_s.type, 1.0)
+            _type_complexity[_s.type] = max(_existing, _project_complexity_score(_s.text, is_fresher))
 
     for item in llm_skills:
         name = item.get("name", "")
@@ -404,6 +513,8 @@ def _build_result_from_llm(
         excerpt: Optional[str] = item.get("excerpt") or None
 
         normalised = raw_score / 100.0  # keep 0-1 for internal consistency
+        is_req = skill_name_to_required.get(name, True) if skill_name_to_required else True
+        sw = 1.5 if is_req else 0.7
 
         if raw_score >= _THRESHOLD_INT:
             conf_value = _CONF_MAP.get(conf_label, 0.75)
@@ -417,18 +528,21 @@ def _build_result_from_llm(
             skills_matched.append(detail)
             if excerpt:
                 all_excerpts.append((normalised, excerpt))
-            if section_type in ("projects", "experience", "work_experience"):
-                project_scores.append(normalised)
-            else:
-                skill_scores.append(normalised)
+            if section_type in _llm_proj_types:
+                complexity = _type_complexity.get(section_type, 1.0)
+                project_scores.append(normalised * sw * complexity)
+            # Flat global coverage: every matched skill contributes full credit to
+            # the skills dimension regardless of which section it was found in.
+            skill_scores.append(sw)
         else:
             skill_gaps.append(name)
 
     edu_text = " ".join(s.text for s in sections if s.type == "education")
     edu_raw = _score_education(edu_text, min_degree, preferred_majors) if weights.education > 0 else 0.0
 
-    project_raw = float(np.mean(project_scores)) if project_scores else 0.0
-    skill_raw = float(np.mean(skill_scores)) if skill_scores else 0.0
+    # Coverage ratio with per-skill weighting: missing skills contribute 0 to numerator
+    project_raw = sum(project_scores) / total_weight
+    skill_raw   = sum(skill_scores)   / total_weight
 
     # Blend JD alignment into the project dimension (30% weight when present)
     jd_align = _compute_jd_alignment(sections, jd_description or "")
@@ -443,6 +557,13 @@ def _build_result_from_llm(
         + skill_raw * weights.skills / _w_sum
         + edu_raw * weights.education / _w_sum
     ) * 100.0
+
+    # Experience years: 15 % additive blend when candidate years are known
+    exp_raw = 1.0
+    if candidate_years is not None and min_experience_years > 0:
+        exp_raw = _score_experience_match(float(candidate_years), min_experience_years)
+        total_float = total_float * 0.85 + exp_raw * 100.0 * 0.15
+
     total_clamped = int(round(max(0.0, min(100.0, total_float))))
 
     top_excerpt: Optional[str] = None
@@ -455,6 +576,7 @@ def _build_result_from_llm(
         project_score=round(project_raw * 100, 2),
         skill_score=round(skill_raw * 100, 2),
         education_score=round(edu_raw * 100, 2),
+        experience_score=round(exp_raw * 100, 2),
         skills_matched=skills_matched,
         skill_gaps=skill_gaps,
         top_excerpt=top_excerpt,
@@ -475,6 +597,10 @@ def score_resume(
     jd_description: Optional[str] = None,
     min_degree: Optional[str] = None,
     preferred_majors: Optional[List[str]] = None,
+    skill_required_flags: Optional[List[bool]] = None,  # parallel to required_skills; True=required (1.5×), False=nice-to-have (0.7×)
+    candidate_years: Optional[float] = None,            # candidate's total years of experience
+    min_experience_years: int = 0,                      # job role's minimum required years
+    is_fresher: bool = False,                           # when True, skip recency decay (all fresher work is recent)
 ) -> ScoreResult:
     """Score a resume against required skills using TF-IDF + cosine similarity.
 
@@ -514,11 +640,21 @@ def score_resume(
     # ------------------------------------------------------------------
     llm_results = score_with_llm(sections, required_skills, cosine_threshold)
     if llm_results is not None:
+        skill_name_to_required = None
+        if skill_required_flags:
+            skill_name_to_required = {
+                required_skills[i].name: skill_required_flags[i]
+                for i in range(min(len(required_skills), len(skill_required_flags)))
+            }
         return _build_result_from_llm(
             llm_results, sections, weights, cosine_threshold,
             jd_description=jd_description,
             min_degree=min_degree,
             preferred_majors=preferred_majors,
+            skill_name_to_required=skill_name_to_required,
+            candidate_years=candidate_years,
+            min_experience_years=min_experience_years,
+            is_fresher=is_fresher,
         )
 
     # ------------------------------------------------------------------
@@ -537,7 +673,23 @@ def score_resume(
     _PROJ_TYPES = {"projects", "experience", "work_experience"}
     _SKILL_TYPES = {"skills", "certifications"}
 
-    for skill in required_skills:
+    # Weighted denominator: required=1.5×, nice-to-have=0.7×; when no flags, all weight=1.0
+    total_weight = sum(
+        1.5 if (skill_required_flags[i] if skill_required_flags and i < len(skill_required_flags) else True) else 0.7
+        for i in range(len(required_skills))
+    ) or 1.0
+
+    # Pre-compute semantic complexity multiplier per section.
+    # Production signals (Docker, deployed, live users) boost; academic/coursework signals reduce.
+    # Only applied to project/experience sections — skills lists and education are unaffected.
+    _section_complexity = [
+        _project_complexity_score(s.text, is_fresher) if s.type in _PROJ_TYPES else 1.0
+        for s in sections
+    ]
+
+    for i, skill in enumerate(required_skills):
+        is_req = skill_required_flags[i] if skill_required_flags and i < len(skill_required_flags) else True
+        sw = 1.5 if is_req else 0.7
         best_proj_score = 0.0
         best_proj_section = "unknown"
         best_skill_score_val = 0.0
@@ -545,14 +697,24 @@ def score_resume(
         best_other_score = 0.0
         best_excerpt: Optional[str] = None
 
-        for section in sections:
+        for si, section in enumerate(sections):
             kw = _keyword_score_in_text(skill.name, section.text)
             if kw == 0.0:
                 continue
             base = _SECTION_BASE_SCORES.get(section.type, 0.40)
-            # Apply recency decay only to experience sections — skills/education lists are timeless
-            recency = _section_recency_factor(section.text) if section.type in _PROJ_TYPES else 1.0
-            effective = kw * base * recency
+            # Freshers: skip recency decay — all their work is recent by definition.
+            # Experienced candidates: decay older project/experience sections.
+            recency = 1.0 if is_fresher else (
+                _section_recency_factor(section.text) if section.type in _PROJ_TYPES else 1.0
+            )
+            complexity = _section_complexity[si]
+            effective = kw * base * recency * complexity
+            # Tenure boost: if the resume explicitly states years for this skill (e.g. "Python 4 yrs"),
+            # apply a small confidence multiplier (up to +15% for 10+ years, capped at 1.0).
+            tenure = _extract_skill_experience_years(skill.name, section.text)
+            if tenure is not None and tenure > 0:
+                tenure_boost = min(1.0 + (min(tenure, 10.0) / 10.0) * 0.15, 1.15)
+                effective = min(effective * tenure_boost, 1.0)
 
             if section.type in _PROJ_TYPES:
                 if effective > best_proj_score:
@@ -593,14 +755,13 @@ def score_resume(
             if best_excerpt:
                 all_excerpts.append((any_score, best_excerpt))
 
-            # Each dimension filled independently — a skill can contribute to both
+            # Each dimension filled independently — a skill can contribute to both.
+            # Multiply by sw (1.5 required / 0.7 nice-to-have) for weighted coverage.
             if best_proj_score >= _MATCH_THRESHOLD:
-                project_scores.append(best_proj_score)
-            if best_skill_score_val >= _MATCH_THRESHOLD:
-                skill_scores.append(best_skill_score_val)
-            elif best_proj_score < _MATCH_THRESHOLD:
-                # Only found in education/summary: partial credit to skill_scores
-                skill_scores.append(best_other_score * 0.65)
+                project_scores.append(best_proj_score * sw)
+            # Flat global coverage: matched anywhere on the resume counts as full credit.
+            # 10/20 required skills matched → exactly 50% skills score, no section penalty.
+            skill_scores.append(sw)
         else:
             skill_gaps.append(skill.name)
 
@@ -610,8 +771,12 @@ def score_resume(
     edu_text = " ".join(s.text for s in sections if s.type == "education")
     edu_raw = _score_education(edu_text, min_degree, preferred_majors) if weights.education > 0 else 0.0
 
-    project_raw = float(np.mean(project_scores)) if project_scores else 0.0
-    skill_raw = float(np.mean(skill_scores)) if skill_scores else 0.0
+    # Weighted coverage ratio: each skill's score is multiplied by its weight (required=1.5, nice-to-have=0.7).
+    # total_weight is the sum of all skill weights (matched + unmatched), so missing skills penalise the score.
+    # When no skill_required_flags are given, total_weight == len(required_skills) → identical to the plain
+    # coverage-ratio fix (Change 1).
+    project_raw = sum(project_scores) / total_weight
+    skill_raw   = sum(skill_scores)   / total_weight
 
     # JD alignment: blend into project dimension when description is provided
     jd_align = _compute_jd_alignment(sections, jd_description or "")
@@ -629,6 +794,16 @@ def score_resume(
         + edu_raw * weights.education / _w_sum
     ) * 100.0
 
+    # Experience years: 15 % additive blend when candidate years are known.
+    # If unknown (None), no penalty — benefit of the doubt.
+    # Formula: total = main_score × 0.85 + exp_match × 100 × 0.15
+    # At full experience (exp_match=1.0), total is unchanged: x×0.85 + 100×0.15 = x×0.85+15.
+    # At 50 % experience (exp_match=0.55): total = x×0.85 + 55×0.15 = x×0.85+8.25 (≈7pt penalty vs qualified).
+    exp_raw = 1.0
+    if candidate_years is not None and min_experience_years > 0:
+        exp_raw = _score_experience_match(float(candidate_years), min_experience_years)
+        total_float = total_float * 0.85 + exp_raw * 100.0 * 0.15
+
     total_clamped = int(round(max(0.0, min(100.0, total_float))))
 
     top_excerpt: Optional[str] = None
@@ -641,6 +816,7 @@ def score_resume(
         project_score=round(project_raw * 100, 2),
         skill_score=round(skill_raw * 100, 2),
         education_score=round(edu_raw * 100, 2),
+        experience_score=round(exp_raw * 100, 2),
         skills_matched=skills_matched,
         skill_gaps=skill_gaps,
         top_excerpt=top_excerpt,

@@ -7,7 +7,7 @@ import logging
 import math
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, desc, asc, or_, select as sa_select
@@ -183,6 +183,7 @@ def list_results(
                 project_score=ev.project_score,
                 skill_score=ev.skill_score,
                 education_score=ev.education_score,
+                experience_score=getattr(ev, "experience_score", 0.0) or 0.0,
                 skills_matched=len(skills_matched_list),
                 skills_total=skills_total_map.get(ev.job_role_id, 0),
                 project_match_score=ev.project_score / 100.0,
@@ -204,6 +205,11 @@ def list_results(
                     "experience_filtered" if ev.eval_status == "experience_filtered"
                     else "tfidf_filtered" if ev.eval_status == "tfidf_filtered"
                     else "llm_scored"
+                ),
+                github_skill_gap_severity=next(
+                    (f.get("severity") for f in _parse_json_list(cand.consistency_flags if cand else None)
+                     if f.get("flag_type") == "github_skill_gap"),
+                    None,
                 ),
             )
         )
@@ -288,7 +294,7 @@ def search_resumes(
     return ResumeSearchResponse(hits=hits, total=total)
 
 
-@router.get("/{evaluation_id}", response_model=EvaluationDetail)
+@router.get("/{evaluation_id:int}", response_model=EvaluationDetail)
 def get_result(
     evaluation_id: int,
     db: Session = Depends(get_db),
@@ -390,6 +396,7 @@ def get_result(
         project_score=ev.project_score,
         skill_score=ev.skill_score,
         education_score=ev.education_score,
+        experience_score=getattr(ev, "experience_score", 0.0) or 0.0,
         evaluated_at=ev.evaluated_at,
         skills_matched=skills_matched,
         skill_gaps=skill_gaps,
@@ -411,7 +418,7 @@ def get_result(
     )
 
 
-@router.post("/{evaluation_id}/email", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{evaluation_id:int}/email", status_code=status.HTTP_202_ACCEPTED)
 def send_email_to_candidate(
     evaluation_id: int,
     body: ManualEmailRequest,
@@ -448,7 +455,7 @@ def send_email_to_candidate(
                             detail="Failed to send email") from exc
 
 
-@router.post("/{evaluation_id}/send-rejection", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{evaluation_id:int}/send-rejection", status_code=status.HTTP_202_ACCEPTED)
 def send_rejection_email(
     evaluation_id: int,
     body: RejectionEmailRequest,
@@ -540,7 +547,7 @@ def delete_all_results(
                             detail="Failed to delete results") from exc
 
 
-@router.delete("/{evaluation_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+@router.delete("/{evaluation_id:int}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_result(
     evaluation_id: int,
     db: Session = Depends(get_db),
@@ -593,7 +600,7 @@ def bulk_delete_results(
         ) from exc
 
 
-@router.patch("/{evaluation_id}/sections", status_code=status.HTTP_200_OK)
+@router.patch("/{evaluation_id:int}/sections", status_code=status.HTTP_200_OK)
 def update_resume_sections(
     evaluation_id: int,
     body: dict,
@@ -641,6 +648,58 @@ def update_resume_sections(
                             detail="Failed to save sections") from exc
 
     return {"saved": len(cleaned)}
+
+
+@router.post("/{evaluation_id:int}/reclassify-and-rescore", status_code=status.HTTP_202_ACCEPTED)
+def reclassify_and_rescore(
+    evaluation_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Re-run the segmenter on stored resume text, save new section types,
+    and trigger background re-scoring so scores update automatically."""
+    from app.services.segmenter import detect_sections
+    from app.routers.evaluate import _run_evaluation
+    from app.services.scorer import ScoringWeights
+
+    ev: Optional[Evaluation] = (
+        db.query(Evaluation)
+        .options(joinedload(Evaluation.resume), joinedload(Evaluation.job_role))
+        .filter(Evaluation.id == evaluation_id)
+        .first()
+    )
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    if ev.resume is None or not ev.resume.raw_text:
+        raise HTTPException(status_code=400, detail="No resume text available for re-classification")
+
+    sections = detect_sections(ev.resume.raw_text)
+    sections_data = [
+        {
+            "type": s.type,
+            "title": s.title,
+            "start_line": s.start_line,
+            "end_line": s.end_line,
+            "text": s.text,
+            "confidence": s.confidence,
+        }
+        for s in sections
+    ]
+    ev.resume.sections = json.dumps(sections_data)
+    db.commit()
+
+    # Build weights from job role config then re-score in background
+    jr = ev.job_role
+    weights = ScoringWeights(
+        projects=float(getattr(jr, "weight_projects", None) or 0.45),
+        skills=float(getattr(jr, "weight_skills", None) or 0.35),
+        education=float(getattr(jr, "weight_education", None) or 0.20),
+    ) if jr else None
+
+    background_tasks.add_task(_run_evaluation, ev.resume_id, ev.job_role_id, weights, db)
+
+    return {"sections": len(sections_data), "message": "Re-classified; re-scoring started in background"}
 
 
 @router.patch("/candidates/{candidate_id}/stage", status_code=status.HTTP_200_OK)
@@ -758,3 +817,83 @@ def export_results_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Summary stats — aggregated across ALL evaluations for a job role
+# ---------------------------------------------------------------------------
+
+@router.get("/summary")
+def results_summary(
+    job_role_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Return aggregate stats for the stat cards — computed over ALL pages, not just the visible one."""
+    soft_deleted_resume_ids = (
+        db.query(Resume.id)
+        .join(ResumeVersion, Resume.id == ResumeVersion.id)
+        .join(Candidate, ResumeVersion.candidate_id == Candidate.id)
+        .filter(Candidate.deleted_at.isnot(None))
+    )
+
+    base = (
+        db.query(Evaluation)
+        .filter(
+            Evaluation.resume_id.notin_(soft_deleted_resume_ids),
+            or_(
+                Evaluation.eval_status.is_(None),
+                Evaluation.eval_status == "tfidf_filtered",
+                Evaluation.eval_status == "experience_filtered",
+            ),
+        )
+    )
+    if job_role_id is not None:
+        base = base.filter(Evaluation.job_role_id == job_role_id)
+
+    total: int = base.count()
+
+    avg_score_row = base.with_entities(func.avg(Evaluation.total_score)).scalar()
+    avg_score = round(float(avg_score_row), 1) if avg_score_row is not None else 0.0
+
+    # Shortlisted: latest shortlist status = 'shortlisted'
+    latest_sl_subq = (
+        db.query(Shortlist.status)
+        .filter(Shortlist.evaluation_id == Evaluation.id)
+        .order_by(Shortlist.changed_at.desc())
+        .limit(1)
+        .correlate(Evaluation)
+        .scalar_subquery()
+    )
+    shortlisted: int = base.filter(latest_sl_subq == "shortlisted").count()
+
+    # needs_manual_review lives on Candidate, not Evaluation — join through the resume chain
+    needs_review: int = (
+        base
+        .join(Resume, Evaluation.resume_id == Resume.id)
+        .join(ResumeVersion, Resume.id == ResumeVersion.id)
+        .join(Candidate, ResumeVersion.candidate_id == Candidate.id)
+        .filter(Candidate.needs_manual_review.is_(True))
+        .count()
+    )
+    tfidf_filtered: int = base.filter(Evaluation.eval_status == "tfidf_filtered").count()
+    experience_filtered: int = base.filter(Evaluation.eval_status == "experience_filtered").count()
+
+    queued_q = (
+        db.query(Evaluation)
+        .filter(Evaluation.eval_status == "queued")
+        .filter(Evaluation.resume_id.notin_(soft_deleted_resume_ids))
+    )
+    if job_role_id is not None:
+        queued_q = queued_q.filter(Evaluation.job_role_id == job_role_id)
+    queued: int = queued_q.count()
+
+    return {
+        "total": total,
+        "avg_score": avg_score,
+        "shortlisted": shortlisted,
+        "needs_review": needs_review,
+        "tfidf_filtered": tfidf_filtered,
+        "experience_filtered": experience_filtered,
+        "queued": queued,
+    }

@@ -671,7 +671,7 @@ class CandidateEmailService:
         )
 
     @classmethod
-    def send_coding_invite(cls, candidate_email: str, candidate_name: str, job_role_title: str, assessment_link: str) -> bool:
+    def send_coding_invite(cls, candidate_email: str, candidate_name: str, job_role_title: str, assessment_link: str, db=None) -> bool:
         """Send Stage 1: Coding Assessment invitation with a direct link."""
         subject = f"Coding Assessment Invite — {job_role_title}"
         plain = (
@@ -706,10 +706,13 @@ class CandidateEmailService:
   </td></tr>"""
             + _FOOTER
         )
+        override = cls._resolve_template(db, "coding_invite", candidate_name, job_role_title)
+        if override:
+            subject, plain = override
         return _send_email(candidate_email, subject, plain, html)
 
     @classmethod
-    def send_interview_invite(cls, candidate_email: str, candidate_name: str, job_role_title: str, interview_details: str) -> bool:
+    def send_interview_invite(cls, candidate_email: str, candidate_name: str, job_role_title: str, interview_details: str, db=None) -> bool:
         """Send Stage 2: Technical Interview invitation."""
         subject = f"Technical Interview Invitation — {job_role_title}"
         plain = (
@@ -719,6 +722,9 @@ class CandidateEmailService:
             "Please confirm your availability by replying to this email.\n\n"
             "Best regards,\nTekTalentScan Recruitment Team"
         )
+        override = cls._resolve_template(db, "interview_invite", candidate_name, job_role_title)
+        if override:
+            subject, plain = override
         return _send_email(candidate_email, subject, plain)
 
     @classmethod

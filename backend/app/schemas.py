@@ -79,19 +79,20 @@ class SkillOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ScoringWeights(BaseModel):
-    projects: int = Field(default=50, ge=0, le=100)
-    skills: int = Field(default=30, ge=0, le=100)
+    projects: int = Field(default=45, ge=0, le=100)
+    skills: int = Field(default=35, ge=0, le=100)
     education: int = Field(default=20, ge=0, le=100)
 
 
 class JobRoleCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     min_experience: int = Field(default=0, ge=0)
-    weight_projects: int = Field(default=50, ge=0, le=100)
-    weight_skills: int = Field(default=30, ge=0, le=100)
+    weight_projects: int = Field(default=45, ge=0, le=100)
+    weight_skills: int = Field(default=35, ge=0, le=100)
     weight_education: int = Field(default=20, ge=0, le=100)
     cosine_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
     skill_ids: List[int] = Field(default_factory=list)
+    skill_required_flags: Optional[List[bool]] = None   # parallel to skill_ids; True=required, False=nice-to-have
     # Auto-pause threshold settings
     shortlist_target: Optional[int] = Field(default=None, ge=1)
     min_fit_score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
@@ -109,6 +110,9 @@ class JobRoleCreate(BaseModel):
     # falls within [min_graduation_year, max_graduation_year]. Either end can be None (unbounded).
     min_graduation_year: Optional[int] = Field(default=None, ge=1980, le=2040)
     max_graduation_year: Optional[int] = Field(default=None, ge=1980, le=2040)
+    # When True, all candidates for this role receive fresher-friendly scoring:
+    # design-verb project boost, no recency decay, flat global skill coverage.
+    is_entry_level: bool = False
 
     @model_validator(mode="after")
     def _weights_must_sum_to_100(self) -> "JobRoleCreate":
@@ -146,6 +150,7 @@ class JobRoleOut(BaseModel):
     tfidf_threshold: Optional[float] = None
     min_graduation_year: Optional[int] = None
     max_graduation_year: Optional[int] = None
+    is_entry_level: bool = False
 
     @field_validator("filter_experience_levels", mode="before")
     @classmethod
@@ -301,6 +306,7 @@ class EvaluationOut(BaseModel):
     project_score: float
     skill_score: float
     education_score: float
+    experience_score: float = 0.0
     evaluated_at: datetime
 
 
@@ -328,6 +334,7 @@ class EvaluationDetail(BaseModel):
     project_score: float
     skill_score: float
     education_score: float
+    experience_score: float = 0.0
     evaluated_at: datetime
     skills_matched: List[SkillMatchDetail] = Field(default_factory=list)
     skill_gaps: List[str] = Field(default_factory=list)
@@ -367,6 +374,7 @@ class ResultsResponse(BaseModel):
     project_score: float
     skill_score: float
     education_score: float
+    experience_score: float = 0.0
     skills_matched: int
     skills_total: int
     project_match_score: float
@@ -384,6 +392,7 @@ class ResultsResponse(BaseModel):
     # Hybrid pipeline fields
     tfidf_score: Optional[float] = None          # Stage-1 TF-IDF cosine similarity
     filter_stage: str = "llm_scored"             # "llm_scored" | "tfidf_filtered"
+    github_skill_gap_severity: Optional[str] = None  # "high" | "medium" | None
 
 
 class PaginatedResults(BaseModel):

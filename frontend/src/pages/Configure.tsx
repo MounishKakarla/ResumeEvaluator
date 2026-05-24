@@ -14,12 +14,9 @@ import {
   extractSkillsFromJd,
   getSystemStatus,
   testSmtpConnection,
-  getEmailTemplates,
-  updateEmailTemplate,
-  resetEmailTemplate,
-  EMAIL_TEMPLATE_LABELS,
 } from '../api/client'
-import type { JobRole, JobRoleRequirement, Skill, EmailTemplate } from '../api/client'
+import type { JobRole, JobRoleRequirement, Skill } from '../api/client'
+import EmailTemplatesPanel from '../components/Configure/EmailTemplatesPanel'
 import { useAppStore } from '../store/useAppStore'
 import SkillTag from '../components/SkillTag'
 
@@ -68,6 +65,8 @@ export default function Configure() {
   const [minExp, setMinExp] = useState(0)
   const [requiredSkillIds, setRequiredSkillIds] = useState<number[]>([])
   const [requiredSkillNames, setRequiredSkillNames] = useState<string[]>([])
+  const [niceToHaveSkillIds, setNiceToHaveSkillIds] = useState<number[]>([])
+  const [niceToHaveSkillNames, setNiceToHaveSkillNames] = useState<string[]>([])
   const [weights, setWeights] = useState({ projects: 50, skills: 30, education: 20 })
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [saveErrMsg, setSaveErrMsg] = useState<string | null>(null)
@@ -101,6 +100,7 @@ export default function Configure() {
   const [filterExpLevels, setFilterExpLevels] = useState<string[]>([])
   const [minGradYear, setMinGradYear] = useState<number | ''>('')
   const [maxGradYear, setMaxGradYear] = useState<number | ''>('')
+  const [isEntryLevel, setIsEntryLevel] = useState(false)
 
 
   // ── Skill browser state ─────────────────────────────────────────────────
@@ -129,43 +129,6 @@ export default function Configure() {
   const role = useAppStore((s) => s.role)
   const isAdmin = role === 'admin'
 
-  const { data: emailTemplates } = useQuery({
-    queryKey: ['emailTemplates'],
-    queryFn: getEmailTemplates,
-    enabled: isAdmin,
-    staleTime: 30_000,
-  })
-
-  const [tplKey, setTplKey] = useState('next_steps')
-  const [tplSubject, setTplSubject] = useState('')
-  const [tplBody, setTplBody] = useState('')
-  const [tplSaveMsg, setTplSaveMsg] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!emailTemplates) return
-    const tpl = emailTemplates.find((t: EmailTemplate) => t.key === tplKey)
-    if (tpl) { setTplSubject(tpl.subject); setTplBody(tpl.body_text) }
-  }, [tplKey, emailTemplates])
-
-  const saveTplMut = useMutation({
-    mutationFn: () => updateEmailTemplate(tplKey, tplSubject, tplBody),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['emailTemplates'] })
-      setTplSaveMsg('Saved')
-      setTimeout(() => setTplSaveMsg(null), 2000)
-    },
-  })
-
-  const resetTplMut = useMutation({
-    mutationFn: () => resetEmailTemplate(tplKey),
-    onSuccess: (tpl) => {
-      queryClient.invalidateQueries({ queryKey: ['emailTemplates'] })
-      setTplSubject(tpl.subject)
-      setTplBody(tpl.body_text)
-      setTplSaveMsg('Reset to default')
-      setTimeout(() => setTplSaveMsg(null), 2000)
-    },
-  })
 
   const [rolesInitialized, setRolesInitialized] = useState(false)
   useEffect(() => {
@@ -182,8 +145,17 @@ export default function Configure() {
     setJobRole(role.id)
     setRoleTitle(role.title)
     setMinExp(role.min_experience)
-    setRequiredSkillIds(role.skill_ids ?? [])
-    setRequiredSkillNames(role.skill_names ?? [])
+    const reqIds: number[] = [], nthIds: number[] = [], reqNames: string[] = [], nthNames: string[] = []
+    ;(role.skill_ids ?? []).forEach((id, i) => {
+      const name = (role.skill_names ?? [])[i] ?? ''
+      const isReq = (role.skill_required_flags ?? [])[i] ?? true
+      if (isReq) { reqIds.push(id); reqNames.push(name) }
+      else { nthIds.push(id); nthNames.push(name) }
+    })
+    setRequiredSkillIds(reqIds)
+    setRequiredSkillNames(reqNames)
+    setNiceToHaveSkillIds(nthIds)
+    setNiceToHaveSkillNames(nthNames)
     setWeights({
       projects: role.weight_projects,
       skills: role.weight_skills,
@@ -206,6 +178,7 @@ export default function Configure() {
     setFilterExpLevels(role.filter_experience_levels ?? [])
     setMinGradYear(role.min_graduation_year ?? '')
     setMaxGradYear(role.max_graduation_year ?? '')
+    setIsEntryLevel(role.is_entry_level ?? false)
     setTimeout(() => { isLoadingRoleRef.current = false }, 0)
   }
 
@@ -229,7 +202,11 @@ export default function Configure() {
         weight_projects: weights.projects,
         weight_skills: weights.skills,
         weight_education: weights.education,
-        skill_ids: requiredSkillIds,
+        skill_ids: [...requiredSkillIds, ...niceToHaveSkillIds],
+        skill_required_flags: [
+          ...requiredSkillIds.map(() => true),
+          ...niceToHaveSkillIds.map(() => false),
+        ],
         description: jdDescription || null,
         min_degree: minDegree || null,
         preferred_majors: preferredMajors,
@@ -240,6 +217,7 @@ export default function Configure() {
         auto_email_enabled: autoEmailEnabled,
         min_graduation_year: minGradYear !== '' ? Number(minGradYear) : null,
         max_graduation_year: maxGradYear !== '' ? Number(maxGradYear) : null,
+        is_entry_level: isEntryLevel,
       }
       if (selectedJobRoleId) return updateJobRole(selectedJobRoleId, payload)
       return createJobRole(payload)
@@ -270,16 +248,31 @@ export default function Configure() {
   })
 
   const extractSkillsMut = useMutation({
-    mutationFn: () => extractSkillsFromJd(jdDescription),
+    mutationFn: (text: string) => extractSkillsFromJd(text),
     onSuccess: (result) => {
-      const newIds = result.skill_ids.filter((id) => !requiredSkillIds.includes(id))
-      const newNames = result.skill_names.filter((_, i) => !requiredSkillIds.includes(result.skill_ids[i]))
-      if (newIds.length === 0) {
+      const addedReqIds: number[] = [], addedReqNames: string[] = []
+      const addedNthIds: number[] = [], addedNthNames: string[] = []
+      result.skill_ids.forEach((id, i) => {
+        const name = result.skill_names[i]
+        const isReq = result.skill_required?.[i] ?? true
+        const alreadyAdded = requiredSkillIds.includes(id) || niceToHaveSkillIds.includes(id)
+        if (alreadyAdded) return
+        if (isReq) { addedReqIds.push(id); addedReqNames.push(name) }
+        else { addedNthIds.push(id); addedNthNames.push(name) }
+      })
+      const totalAdded = addedReqIds.length + addedNthIds.length
+      if (totalAdded === 0) {
         setJdExtractMsg('No new skills found in JD')
       } else {
-        setRequiredSkillIds((prev) => [...prev, ...newIds])
-        setRequiredSkillNames((prev) => [...prev, ...newNames])
-        setJdExtractMsg(`${newIds.length} skill${newIds.length !== 1 ? 's' : ''} added from JD`)
+        if (addedReqIds.length > 0) {
+          setRequiredSkillIds((prev) => [...prev, ...addedReqIds])
+          setRequiredSkillNames((prev) => [...prev, ...addedReqNames])
+        }
+        if (addedNthIds.length > 0) {
+          setNiceToHaveSkillIds((prev) => [...prev, ...addedNthIds])
+          setNiceToHaveSkillNames((prev) => [...prev, ...addedNthNames])
+        }
+        setJdExtractMsg(`${totalAdded} skill${totalAdded !== 1 ? 's' : ''} added from JD`)
       }
       setTimeout(() => setJdExtractMsg(null), 3000)
     },
@@ -303,6 +296,8 @@ export default function Configure() {
       setMinExp(0)
       setRequiredSkillIds([])
       setRequiredSkillNames([])
+      setNiceToHaveSkillIds([])
+      setNiceToHaveSkillNames([])
       setWeights({ projects: 50, skills: 30, education: 20 })
       setJdDescription('')
       setMinDegree('')
@@ -335,7 +330,7 @@ export default function Configure() {
     autoSaveTimerRef.current = setTimeout(() => saveRoleMut.mutate(), 300)
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requiredSkillIds])
+  }, [requiredSkillIds, niceToHaveSkillIds])
 
   // ── Weight auto-adjust ───────────────────────────────────────────────────
   // When one slider moves, the other two redistribute proportionally so the
@@ -358,8 +353,21 @@ export default function Configure() {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
-  function addSkillFromTaxonomy(skill: Skill) {
-    if (!requiredSkillIds.includes(skill.id)) {
+  function toggleSkill(skill: Skill) {
+    const reqIdx = requiredSkillIds.indexOf(skill.id)
+    const nthIdx = niceToHaveSkillIds.indexOf(skill.id)
+    if (reqIdx !== -1) {
+      // Required → Nice-to-have
+      setRequiredSkillIds((prev) => prev.filter((_, i) => i !== reqIdx))
+      setRequiredSkillNames((prev) => prev.filter((_, i) => i !== reqIdx))
+      setNiceToHaveSkillIds((prev) => [...prev, skill.id])
+      setNiceToHaveSkillNames((prev) => [...prev, skill.name])
+    } else if (nthIdx !== -1) {
+      // Nice-to-have → Remove
+      setNiceToHaveSkillIds((prev) => prev.filter((_, i) => i !== nthIdx))
+      setNiceToHaveSkillNames((prev) => prev.filter((_, i) => i !== nthIdx))
+    } else {
+      // Unselected → Required
       setRequiredSkillIds((prev) => [...prev, skill.id])
       setRequiredSkillNames((prev) => [...prev, skill.name])
     }
@@ -368,6 +376,11 @@ export default function Configure() {
   function removeRequiredSkill(idx: number) {
     setRequiredSkillIds((prev) => prev.filter((_, i) => i !== idx))
     setRequiredSkillNames((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  function removeNiceToHaveSkill(idx: number) {
+    setNiceToHaveSkillIds((prev) => prev.filter((_, i) => i !== idx))
+    setNiceToHaveSkillNames((prev) => prev.filter((_, i) => i !== idx))
   }
 
   const filteredSkills: Skill[] = skillsData?.items ?? []
@@ -393,6 +406,8 @@ export default function Configure() {
                   setMinExp(0)
                   setRequiredSkillIds([])
                   setRequiredSkillNames([])
+                  setNiceToHaveSkillIds([])
+                  setNiceToHaveSkillNames([])
                   setWeights({ projects: 50, skills: 30, education: 20 })
                   setJdDescription('')
                   setMinDegree('')
@@ -460,6 +475,21 @@ export default function Configure() {
             ))}
             {requiredSkillNames.length === 0 && (
               <span className="text-xs text-gray-400 dark:text-gray-500">Click skills below to add</span>
+            )}
+          </div>
+        </div>
+
+        {/* Nice-to-Have Skills */}
+        <div>
+          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+            Nice to Have ({niceToHaveSkillIds.length})
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {niceToHaveSkillNames.map((name, idx) => (
+              <SkillTag key={niceToHaveSkillIds[idx]} label={name} onRemove={() => removeNiceToHaveSkill(idx)} variant="amber" />
+            ))}
+            {niceToHaveSkillNames.length === 0 && (
+              <span className="text-xs text-gray-400 dark:text-gray-500">Optional preferred skills</span>
             )}
           </div>
         </div>
@@ -579,6 +609,25 @@ export default function Configure() {
                 </button>
               )}
             </div>
+          </div>
+
+          {/* Entry / Fresher / Intern Role Toggle */}
+          <div className="mt-4">
+            <label className="text-xs text-gray-500 dark:text-gray-400 mb-2 block">
+              Scoring Mode
+              <span className="ml-1 font-normal text-gray-400 dark:text-gray-500">(entry-level scoring rewards design-oriented projects and skips recency decay)</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setIsEntryLevel(!isEntryLevel)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                isEntryLevel
+                  ? 'bg-[#534AB7] text-white border-[#534AB7]'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-[#534AB7]'
+              }`}
+            >
+              Entry / Fresher / Intern
+            </button>
           </div>
 
           {/* Graduation Year Range Filter */}
@@ -827,6 +876,7 @@ export default function Configure() {
                     try {
                       const result = await extractJdText(file)
                       setJdDescription(result.text)
+                      extractSkillsMut.mutate(result.text)
                     } catch {
                       alert('Failed to extract text from file.')
                     } finally {
@@ -846,7 +896,7 @@ export default function Configure() {
             />
             <div className="flex items-center gap-2 mt-2">
               <button
-                onClick={() => extractSkillsMut.mutate()}
+                onClick={() => extractSkillsMut.mutate(jdDescription)}
                 disabled={extractSkillsMut.isPending || !jdDescription.trim()}
                 className="text-xs font-medium px-3 py-1.5 rounded-lg border border-[#534AB7] text-[#534AB7] hover:bg-[#EEEDFE] disabled:opacity-50 transition-colors"
               >
@@ -1072,7 +1122,9 @@ export default function Configure() {
         {/* Skill Taxonomy Browser */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
           <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-1">Skill Taxonomy</h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">Click a skill to add it to the required list.</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+            Click a skill to cycle: <span className="font-medium text-[#534AB7]">Required ✓</span> → <span className="font-medium text-amber-600">Nice-to-have ★</span> → removed.
+          </p>
           <div className="flex gap-2 mb-4">
             <input
               className="flex-1 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
@@ -1097,28 +1149,51 @@ export default function Configure() {
               <span className="text-xs text-gray-400 dark:text-gray-500">No skills found.</span>
             )}
             {filteredSkills.map((skill) => {
-              const selected = requiredSkillIds.includes(skill.id)
+              const isReq = requiredSkillIds.includes(skill.id)
+              const isNth = niceToHaveSkillIds.includes(skill.id)
               return (
                 <div key={skill.id} className="inline-flex items-center gap-0.5">
+                  {/* 3-state cycling chip: unselected → required → nice-to-have → removed */}
                   <button
-                    onClick={() => addSkillFromTaxonomy(skill)}
-                    title="Click to add to required skills"
+                    onClick={() => toggleSkill(skill)}
+                    title={isReq ? 'Required — click for nice-to-have' : isNth ? 'Nice-to-have — click to remove' : 'Click to add as required'}
                     className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-l-full border transition-colors ${
-                      selected
-                        ? 'bg-[#534AB7] text-white border-[#534AB7]'
-                        : 'bg-[#EEEDFE] dark:bg-[#2d2a5a] text-[#3C3489] dark:text-[#AFA9EC] border-[#AFA9EC] hover:bg-[#534AB7] hover:text-white hover:border-[#534AB7]'
+                      isReq
+                        ? 'bg-[#534AB7] text-white border-[#534AB7] hover:bg-[#3C3489]'
+                        : isNth
+                          ? 'bg-amber-400 text-white border-amber-400 hover:bg-amber-500'
+                          : 'bg-[#EEEDFE] dark:bg-[#2d2a5a] text-[#3C3489] dark:text-[#AFA9EC] border-[#AFA9EC] hover:bg-[#534AB7] hover:text-white hover:border-[#534AB7]'
                     }`}
                   >
                     {skill.name}
-                    <span className="opacity-50 text-[10px]">{skill.category}</span>
+                    {isReq && <span className="text-[10px]">✓</span>}
+                    {isNth && <span className="text-[10px]">★</span>}
+                    {!isReq && !isNth && <span className="opacity-50 text-[10px]">{skill.category}</span>}
                   </button>
-                  <button
-                    onClick={() => deleteSkillMut.mutate(skill.id)}
-                    title="Delete from taxonomy"
-                    className="text-xs px-1.5 py-1 rounded-r-full border border-l-0 border-[#AFA9EC] dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500 hover:border-red-300 dark:hover:border-red-700 transition-colors"
-                  >
-                    ×
-                  </button>
+                  {/* Delete from taxonomy — only when unselected */}
+                  {!isReq && !isNth && (
+                    <button
+                      onClick={() => deleteSkillMut.mutate(skill.id)}
+                      title="Delete from taxonomy"
+                      className="text-xs px-1.5 py-1 rounded-r-full border border-l-0 border-[#AFA9EC] dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500 hover:border-red-300 dark:hover:border-red-700 transition-colors"
+                    >
+                      ×
+                    </button>
+                  )}
+                  {/* Show state indicator when selected (rounded-r since no delete button) */}
+                  {(isReq || isNth) && (
+                    <button
+                      onClick={() => toggleSkill(skill)}
+                      title="Click to advance state"
+                      className={`text-[10px] px-1.5 py-1 rounded-r-full border border-l-0 transition-colors ${
+                        isReq
+                          ? 'bg-[#534AB7] text-white border-[#534AB7] hover:bg-[#3C3489]'
+                          : 'bg-amber-400 text-white border-amber-400 hover:bg-amber-500'
+                      }`}
+                    >
+                      {isReq ? '→★' : '×'}
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -1163,76 +1238,7 @@ export default function Configure() {
         </div>
 
         {/* Email Templates — admin only */}
-        {isAdmin && (
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-            <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-1">Email Templates</h2>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-              Customize the subject and body of candidate-facing emails. Use{' '}
-              <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded text-[11px]">{'{candidate_name}'}</code>{' '}
-              and{' '}
-              <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded text-[11px]">{'{job_title}'}</code>{' '}
-              as placeholders.
-            </p>
-            <div className="flex gap-2 mb-4 flex-wrap">
-              {Object.entries(EMAIL_TEMPLATE_LABELS).map(([key, label]) => {
-                const tpl = emailTemplates?.find((t: EmailTemplate) => t.key === key)
-                const isCustom = tpl?.updated_at != null
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setTplKey(key)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                      tplKey === key
-                        ? 'bg-[#534AB7] text-white border-[#534AB7]'
-                        : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-[#534AB7]'
-                    }`}
-                  >
-                    {label}
-                    {isCustom && <span className="ml-1 text-[9px] opacity-70">●</span>}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Subject</label>
-                <input
-                  className={inputCls}
-                  value={tplSubject}
-                  onChange={(e) => setTplSubject(e.target.value)}
-                  placeholder="Email subject…"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Body (plain text)</label>
-                <textarea
-                  rows={8}
-                  className={`${inputCls} resize-y font-mono text-xs`}
-                  value={tplBody}
-                  onChange={(e) => setTplBody(e.target.value)}
-                  placeholder="Email body…"
-                />
-              </div>
-              <div className="flex items-center gap-3 pt-1">
-                <button
-                  onClick={() => saveTplMut.mutate()}
-                  disabled={saveTplMut.isPending || !tplSubject.trim() || !tplBody.trim()}
-                  className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white text-sm font-semibold rounded-lg px-4 py-2 transition-colors"
-                >
-                  {saveTplMut.isPending ? 'Saving…' : 'Save Template'}
-                </button>
-                <button
-                  onClick={() => { if (confirm('Reset to default template?')) resetTplMut.mutate() }}
-                  disabled={resetTplMut.isPending}
-                  className="border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 text-sm rounded-lg px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
-                >
-                  {resetTplMut.isPending ? 'Resetting…' : 'Reset to Default'}
-                </button>
-                {tplSaveMsg && <span className="text-xs text-[#1D9E75] font-medium">{tplSaveMsg}</span>}
-              </div>
-            </div>
-          </div>
-        )}
+        {isAdmin && <EmailTemplatesPanel />}
 
       </div>
     </div>

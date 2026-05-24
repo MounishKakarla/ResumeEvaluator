@@ -66,6 +66,7 @@ export interface JobRole {
   cosine_threshold: number
   skill_ids: number[]
   skill_names: string[]
+  skill_required_flags: boolean[]
   intake_paused: boolean
   shortlist_target: number | null
   min_fit_score: number | null
@@ -79,6 +80,7 @@ export interface JobRole {
   tfidf_threshold: number
   min_graduation_year?: number | null
   max_graduation_year?: number | null
+  is_entry_level: boolean
 }
 
 export interface JobRoleCreate {
@@ -89,6 +91,7 @@ export interface JobRoleCreate {
   weight_education: number
   cosine_threshold: number
   skill_ids: number[]
+  skill_required_flags?: boolean[]
   shortlist_target?: number | null
   min_fit_score?: number | null
   description?: string | null
@@ -98,6 +101,7 @@ export interface JobRoleCreate {
   auto_email_enabled?: boolean
   min_graduation_year?: number | null
   max_graduation_year?: number | null
+  is_entry_level?: boolean
 }
 
 // ─── Enrichment ──────────────────────────────────────────────────────────────
@@ -227,6 +231,7 @@ export interface CandidateResult {
   candidate_stage: CandidateStage
   tfidf_score: number | null
   filter_stage: 'llm_scored' | 'tfidf_filtered' | 'experience_filtered'
+  github_skill_gap_severity?: 'low' | 'medium' | 'high' | null
 }
 
 export interface PaginatedResults {
@@ -285,6 +290,13 @@ export async function updateResumeSections(
   await apiClient.patch(`/results/${evaluationId}/sections`, { sections })
 }
 
+export async function reclassifyAndRescore(evaluationId: number): Promise<{ sections: number; message: string }> {
+  const { data } = await apiClient.post<{ sections: number; message: string }>(
+    `/results/${evaluationId}/reclassify-and-rescore`
+  )
+  return data
+}
+
 // ─── Axios Instance ──────────────────────────────────────────────────────────
 
 const apiClient = axios.create({
@@ -339,9 +351,9 @@ apiClient.interceptors.response.use(
           // refresh failed — fall through to logout
         }
       }
-      localStorage.removeItem('token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('auth-store')
+      import('../store/useAppStore').then(({ useAppStore }) => {
+        useAppStore.getState().clearAuth()
+      })
       window.location.href = '/login'
     }
     return Promise.reject(error)
@@ -382,8 +394,8 @@ export async function deleteSkill(id: number): Promise<void> {
   await apiClient.delete(`/skills/${id}`)
 }
 
-export async function extractSkillsFromJd(text: string): Promise<{ skill_ids: number[]; skill_names: string[] }> {
-  const { data } = await apiClient.post<{ skill_ids: number[]; skill_names: string[] }>(
+export async function extractSkillsFromJd(text: string): Promise<{ skill_ids: number[]; skill_names: string[]; skill_required: boolean[] }> {
+  const { data } = await apiClient.post<{ skill_ids: number[]; skill_names: string[]; skill_required: boolean[] }>(
     '/skills/extract-from-jd',
     { text }
   )
@@ -470,6 +482,34 @@ export async function runEvaluation(
 
 export async function bulkRerun(jobRoleId: number): Promise<void> {
   await apiClient.post(`/evaluate/rerun`, { job_role_id: jobRoleId })
+}
+
+export async function pauseEvaluation(jobRoleId: number): Promise<void> {
+  await apiClient.post(`/evaluate/pause?job_role_id=${jobRoleId}`)
+}
+
+export async function resumeEvaluation(jobRoleId: number): Promise<{ queued_count: number; message?: string }> {
+  const { data } = await apiClient.post<{ queued_count: number; message?: string }>(
+    `/evaluate/resume?job_role_id=${jobRoleId}`
+  )
+  return data
+}
+
+export interface ResultsSummary {
+  total: number
+  avg_score: number
+  shortlisted: number
+  needs_review: number
+  tfidf_filtered: number
+  experience_filtered: number
+  queued: number
+}
+
+export async function getResultsSummary(jobRoleId?: number): Promise<ResultsSummary> {
+  const params: Record<string, unknown> = {}
+  if (jobRoleId != null) params.job_role_id = jobRoleId
+  const { data } = await apiClient.get<ResultsSummary>('/results/summary', { params })
+  return data
 }
 
 export interface EvaluationStatus {

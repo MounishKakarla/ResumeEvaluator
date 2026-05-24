@@ -174,6 +174,10 @@ def _apply_schema_patches() -> None:
             "ALTER TABLE job_roles ADD COLUMN max_graduation_year INTEGER",
         ),
         (
+            "ALTER TABLE job_roles ADD COLUMN IF NOT EXISTS is_entry_level BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE job_roles ADD COLUMN is_entry_level BOOLEAN NOT NULL DEFAULT FALSE",
+        ),
+        (
             "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS project_analysis TEXT",
             "ALTER TABLE candidates ADD COLUMN project_analysis TEXT",
         ),

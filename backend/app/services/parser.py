@@ -48,6 +48,13 @@ _TITLE_WORDS = {
 }
 _DATE_LINE_RE = re.compile(r'^[\d\s\-/,–—|•]+$')
 
+# Matches internship/trainee role indicators — used to exclude these from years_experience
+_INTERN_KEYWORDS_RE = re.compile(
+    r'\b(intern(?:ship)?s?|trainee|apprentice|student\s+(?:engineer|developer|researcher|worker)|'
+    r'industrial\s+train(?:ing|ee)|summer\s+(?:project|training|program))\b',
+    re.I,
+)
+
 # Matches: "2018 - 2022", "Jan 2020 – Mar 2023", "10/2020 – 05/2024", "2021 - Present"
 # Optional MM/ or DD/ prefix before the 4-digit year handles MM/YYYY format.
 _DATE_RANGE_RE = re.compile(
@@ -67,6 +74,14 @@ def _parse_year(token: str) -> int:
         return datetime.now().year
     m = re.search(r'\d{4}', token)
     return int(m.group()) if m else datetime.now().year
+
+
+def _is_internship_context(text: str, match_start: int) -> bool:
+    """Return True if the 5 lines preceding a date-range match contain internship keywords."""
+    preceding = text[max(0, match_start - 400):match_start]
+    lines = [l.strip() for l in preceding.splitlines() if l.strip()]
+    context = "\n".join(lines[-5:]) if lines else ""
+    return bool(_INTERN_KEYWORDS_RE.search(context))
 
 
 def _merge_intervals(intervals: List[Tuple[int, int]]) -> float:
@@ -104,6 +119,8 @@ def extract_years_experience(sections: "List[Any]") -> Optional[float]:
         text = sec.text if hasattr(sec, "text") else sec.get("text", "")
         if sec_type in ("experience", "work_experience"):
             for m in _DATE_RANGE_RE.finditer(text):
+                if _is_internship_context(text, m.start()):
+                    continue
                 start = _parse_year(m.group(1))
                 end = _parse_year(m.group(2))
                 if 1970 <= start <= datetime.now().year and start <= end <= datetime.now().year + 1:
@@ -711,7 +728,10 @@ def extract_metadata_via_llm(text: str) -> Optional[dict]:
             "experience_level must be one of: entry, junior, mid, senior, executive\n"
             "entry=0-1 yr (interns, fresh grads, trainees). "
             "junior=1-3 yrs. mid=3-5 yrs. senior=5-10 yrs. executive=10+ yrs or C-level/VP/Director.\n"
-            "years_experience is a number (float). graduation_year is a 4-digit integer.\n\n"
+            "years_experience counts ONLY full-time/permanent roles. "
+            "Internship, trainee, and student positions do NOT count toward years_experience.\n"
+            "If the candidate only has internship experience, set years_experience=null.\n"
+            "graduation_year is a 4-digit integer.\n\n"
             f"Resume:\n{sample}"
         )
 

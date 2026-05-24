@@ -184,8 +184,11 @@ def _extract_skills_via_llm(text: str) -> list[dict]:
         prompt = (
             "Extract all technical skills, tools, frameworks, and technologies from this job description. "
             "Return ONLY valid JSON:\n"
-            '{"skills":[{"name":"Python","category":"language"},...]}\n\n'
+            '{"skills":[{"name":"Python","category":"language","is_required":true},...]}\n\n'
             f"Categories must be one of: {', '.join(sorted(_VALID_SKILL_CATEGORIES))}\n\n"
+            "Set is_required=true for skills described as required, must-have, or mandatory.\n"
+            "Set is_required=false for skills described as preferred, nice-to-have, bonus, or a plus.\n"
+            "Default to is_required=true when signals are ambiguous.\n\n"
             f"Job description:\n{sample}"
         )
 
@@ -212,7 +215,7 @@ def _extract_skills_via_llm(text: str) -> list[dict]:
             cat = s.get("category", "skill")
             if cat not in _VALID_SKILL_CATEGORIES:
                 cat = "skill"
-            result.append({"name": str(s["name"]).strip(), "category": cat})
+            result.append({"name": str(s["name"]).strip(), "category": cat, "is_required": bool(s.get("is_required", True))})
 
         logger.debug("LLM extracted %d skills from JD", len(result))
         return result
@@ -238,37 +241,47 @@ def extract_skills_from_jd(
 
     text = body.text
     if not text or not text.strip():
-        return {"skill_ids": [], "skill_names": []}
+        return {"skill_ids": [], "skill_names": [], "skill_required": []}
 
     text_lower = text.lower()
-    found_canonical: dict[str, str] = {}  # canonical_lower → display_name
+    found_canonical: dict[str, str] = {}        # canonical_lower → display_name
+    found_is_required: dict[str, bool] = {}     # canonical_lower → is_required flag
 
-    # 1. Match against the built-in known-skills list
+    # 1. Match against the built-in known-skills list (all rule-based hits default to required)
     for display_name, category in _KNOWN_TECH_SKILLS:
         dn_lower = display_name.lower()
         # word-boundary search (handles "React" not matching "Reactive")
         pattern = _re.compile(r'(?<![a-z0-9])' + _re.escape(dn_lower) + r'(?![a-z0-9])', _re.I)
         if pattern.search(text_lower):
             found_canonical[dn_lower] = display_name
+            found_is_required.setdefault(dn_lower, True)
 
     # 2. Match aliases → canonical
     for alias, canonical in _JD_SKILL_ALIASES.items():
         pattern = _re.compile(r'(?<![a-z0-9])' + _re.escape(alias) + r'(?![a-z0-9])', _re.I)
         if pattern.search(text_lower):
             found_canonical[canonical.lower()] = canonical
+            found_is_required.setdefault(canonical.lower(), True)
 
     # 2b. LLM-based dynamic skill extraction (merges without overwriting rule-based hits)
     llm_category_extras: dict[str, str] = {}  # name_lower → category for LLM-only skills
     for s in _extract_skills_via_llm(text):
         name_lower = s["name"].lower()
+        is_req = bool(s.get("is_required", True))
         # Resolve through alias table first
         canonical = _JD_SKILL_ALIASES.get(name_lower)
         if canonical:
             found_canonical[canonical.lower()] = canonical
             llm_category_extras[canonical.lower()] = s["category"]
+            # LLM flag overrides default only if skill was NOT already found by rule-based pass
+            found_is_required.setdefault(canonical.lower(), is_req)
         elif name_lower not in found_canonical:
             found_canonical[name_lower] = s["name"]
             llm_category_extras[name_lower] = s["category"]
+            found_is_required[name_lower] = is_req
+        else:
+            # Skill already found by rule-based pass; let LLM refine the required flag
+            found_is_required[name_lower] = is_req
 
     # 3. Also check existing DB skills via keyword scorer
     from app.services.scorer import _keyword_score_in_text
@@ -277,13 +290,15 @@ def extract_skills_from_jd(
     for skill in all_skills:
         if _keyword_score_in_text(skill.name, text) >= 0.85:
             found_canonical[skill.name.lower()] = skill.name
+            found_is_required.setdefault(skill.name.lower(), True)
 
     if not found_canonical:
-        return {"skill_ids": [], "skill_names": []}
+        return {"skill_ids": [], "skill_names": [], "skill_required": []}
 
     # 4. Upsert: look up each found skill, create if missing
     matched_ids: List[int] = []
     matched_names: List[str] = []
+    matched_required: List[bool] = []
 
     # Build category map: known list + LLM hints (known list takes precedence)
     category_map = {name.lower(): cat for name, cat in _KNOWN_TECH_SKILLS}
@@ -306,9 +321,10 @@ def extract_skills_from_jd(
             db.flush()
             matched_ids.append(new_skill.id)
             matched_names.append(display_name)
+        matched_required.append(found_is_required.get(dn_lower, True))
 
     db.commit()
-    return {"skill_ids": matched_ids, "skill_names": matched_names}
+    return {"skill_ids": matched_ids, "skill_names": matched_names, "skill_required": matched_required}
 
 
 @router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
