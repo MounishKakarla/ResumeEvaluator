@@ -24,7 +24,7 @@ def record_audit(
     user_id: Optional[int],
     action: str,
     target_type: str,
-    target_id: int,
+    target_id: Optional[int],
     details: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Append one row to audit_log. Caller must commit the session."""

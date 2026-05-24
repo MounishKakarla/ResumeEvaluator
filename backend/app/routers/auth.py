@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import create_access_token, create_refresh_token, decode_refresh_token, get_password_hash, verify_password
 from app.deps import get_current_user, get_db
 from app.models import User
+from app.routers.audit import record_audit
 from app.schemas import ChangePasswordRequest, ForgotPasswordRequest, RefreshRequest, Token, UserLogin
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -34,6 +35,8 @@ def login(body: UserLogin, db: Session = Depends(get_db)) -> Token:
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    record_audit(db, user.id, "login", "user", user.id)
+    db.commit()
     return _issue_token_pair(user)
 
 
@@ -50,6 +53,7 @@ def change_password(
             detail="Current password is incorrect",
         )
     current_user.hashed_password = get_password_hash(body.new_password)
+    record_audit(db, current_user.id, "password_changed", "user", current_user.id)
     db.commit()
     return {"message": "Password updated. Please log in again."}
 
@@ -62,6 +66,7 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)) 
         alphabet = string.ascii_letters + string.digits + "!@#$%"
         new_password = "".join(secrets.choice(alphabet) for _ in range(12))
         user.hashed_password = get_password_hash(new_password)
+        record_audit(db, user.id, "password_reset_requested", "user", user.id)
         db.commit()
         name = user.email.split("@")[0].replace(".", " ").title()
         try:

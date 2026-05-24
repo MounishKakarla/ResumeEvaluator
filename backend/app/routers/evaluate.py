@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_current_user, get_db
+from app.routers.audit import record_audit
 from app.models import Candidate, Evaluation, JobRole, JobRoleSkill, Resume, ResumeVersion, Shortlist, Skill, User
 from app.models import _utcnow
 from app.schemas import BulkRerunRequest, EvaluationRequest, EvaluationResponse, ScoringWeights, SendNextStepsRequest
@@ -1141,6 +1142,8 @@ def send_next_steps_email(
         if not sent_ok:
             return {"sent": False, "message": "SMTP is not configured — email not sent"}
         ev.email_sent_at = _utcnow()
+        record_audit(db, current_user.id, "next_steps_email_sent", "evaluation", evaluation_id,
+                     {"candidate_email": candidate.email})
         db.commit()
         logger.info("Manual next-steps email sent to %s by user %d", candidate.email, current_user.id)
         return {"sent": True, "message": f"Next-steps email sent to {candidate.email}"}
@@ -1220,6 +1223,8 @@ def bulk_send_next_steps(
             logger.warning("Bulk email failed for candidate %s: %s", candidate.email, exc)
             errors += 1
 
+    record_audit(db, current_user.id, "bulk_next_steps_emails_sent", "job_role", job_role_id,
+                 {"sent": sent, "skipped": skipped, "errors": errors})
     db.commit()
     logger.info(
         "Bulk next-steps emails for job_role_id=%d: sent=%d skipped=%d errors=%d by user=%d",

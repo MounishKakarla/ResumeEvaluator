@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_current_user, get_db
 from app.models import Evaluation, JobRole, JobRoleRequirement, JobRoleSkill, Skill, User
+from app.routers.audit import record_audit
 from app.schemas import (
     IntakePauseRequest,
     JobRoleCreate,
@@ -125,6 +126,9 @@ def set_intake_pause(
 
     was_paused = role.intake_paused
     role.intake_paused = body.paused
+    action = "job_role_intake_paused" if body.paused else "job_role_intake_resumed"
+    record_audit(db, current_user.id, action, "job_role", role_id,
+                 {"title": role.title})
     db.commit()
     db.refresh(role)
 
@@ -202,6 +206,8 @@ def create_job_role(
         skill_names.append(skill.name)
         stored_flags.append(is_req)
 
+    record_audit(db, current_user.id, "job_role_created", "job_role", role.id,
+                 {"title": body.title})
     db.commit()
     r = _load_role(role.id, db)
     assert r is not None
@@ -259,6 +265,8 @@ def update_job_role(
         skill_names.append(skill.name)
         stored_flags.append(is_req)
 
+    record_audit(db, current_user.id, "job_role_updated", "job_role", role_id,
+                 {"title": body.title})
     db.commit()
     r = _load_role(role_id, db)
     assert r is not None
@@ -292,6 +300,8 @@ def replace_requirements(
         db.add(obj)
         new_reqs.append(obj)
 
+    record_audit(db, current_user.id, "job_role_requirements_updated", "job_role", role_id,
+                 {"count": len(body.requirements)})
     db.commit()
     for obj in new_reqs:
         db.refresh(obj)
@@ -308,5 +318,7 @@ def delete_job_role(
     role = db.query(JobRole).filter(JobRole.id == role_id).first()
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job role not found")
+    record_audit(db, current_user.id, "job_role_deleted", "job_role", role_id,
+                 {"title": role.title})
     db.delete(role)
     db.commit()

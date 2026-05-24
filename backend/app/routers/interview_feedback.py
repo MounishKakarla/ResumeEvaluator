@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db
 from app.models import InterviewFeedback, User
+from app.routers.audit import record_audit
 
 router = APIRouter(prefix="/interview-feedback", tags=["interview-feedback"])
 
@@ -79,6 +80,8 @@ def create_feedback(
         notes=body.notes,
     )
     db.add(fb)
+    record_audit(db, current_user.id, "interview_feedback_added", "candidate", body.candidate_id,
+                 {"stage": body.stage, "rating": body.rating, "recommendation": body.recommendation})
     db.commit()
     db.refresh(fb)
     return _to_out(fb)
@@ -110,5 +113,7 @@ def delete_feedback(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not found")
     if fb.interviewer_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your feedback")
+    record_audit(db, current_user.id, "interview_feedback_deleted", "candidate", fb.candidate_id,
+                 {"stage": fb.stage, "feedback_id": feedback_id})
     db.delete(fb)
     db.commit()

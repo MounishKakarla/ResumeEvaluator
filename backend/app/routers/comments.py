@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_current_user, get_db
 from app.models import Candidate, CandidateComment, User
+from app.routers.audit import record_audit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/candidates/{candidate_id}/comments", tags=["comments"])
@@ -82,6 +83,7 @@ def create_comment(
         body=body.body,
     )
     db.add(comment)
+    record_audit(db, current_user.id, "comment_added", "candidate", candidate_id)
     db.commit()
     db.refresh(comment)
     # Reload with author relation
@@ -108,6 +110,7 @@ def update_comment(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit another user's comment")
     comment.body = body.body
     comment.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    record_audit(db, current_user.id, "comment_updated", "candidate", candidate_id)
     db.commit()
     db.refresh(comment)
     comment = (
@@ -130,6 +133,7 @@ def delete_comment(
     comment = _get_comment(comment_id, candidate_id, db)
     if comment.author_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete another user's comment")
+    record_audit(db, current_user.id, "comment_deleted", "candidate", candidate_id)
     db.delete(comment)
     db.commit()
 

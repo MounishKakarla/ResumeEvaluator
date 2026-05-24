@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_password_hash
 from app.deps import get_current_user, get_db
 from app.models import Candidate, EmailTemplate, User
+from app.routers.audit import record_audit
 from app.schemas import EmailTemplateOut, EmailTemplateUpdate
 from app.services.email import send_password_reset_email, send_welcome_email
 
@@ -75,6 +76,10 @@ def create_user(
     db.commit()
     db.refresh(user)
 
+    record_audit(db, current_user.id, "user_created", "user", user.id,
+                 {"email": req.email, "role": req.role})
+    db.commit()
+
     try:
         send_welcome_email(req.email, name, req.role, password)
     except Exception:
@@ -97,6 +102,8 @@ def reset_user_password(
 
     new_password = _gen_password()
     user.hashed_password = get_password_hash(new_password)
+    record_audit(db, current_user.id, "password_reset", "user", user_id,
+                 {"target_email": user.email})
     db.commit()
 
     name = user.email.split("@")[0].replace(".", " ").title()
@@ -122,6 +129,9 @@ def revoke_user(
     if user.id == current_user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot revoke your own account")
     user.is_active = not user.is_active
+    action = "user_activated" if user.is_active else "user_revoked"
+    record_audit(db, current_user.id, action, "user", user_id,
+                 {"target_email": user.email, "is_active": user.is_active})
     db.commit()
     db.refresh(user)
     return user
@@ -147,6 +157,8 @@ def delete_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot delete the last admin account",
             )
+    record_audit(db, current_user.id, "user_deleted", "user", user_id,
+                 {"target_email": user.email, "role": user.role})
     db.delete(user)
     db.commit()
 
@@ -263,6 +275,8 @@ def save_imap_settings(
     _upsert("imap_ssl", "true" if req.imap_ssl else "false")
     _upsert("imap_folder", req.imap_folder.strip() or "INBOX")
     _upsert("imap_subject_keywords", req.imap_subject_keywords)
+    record_audit(db, current_user.id, "imap_settings_updated", "system", None,
+                 {"host": req.imap_host, "username": req.imap_username})
     db.commit()
 
     return {"message": "IMAP settings saved. The ingestion worker will use these on the next poll cycle."}
@@ -430,6 +444,8 @@ def save_graph_settings(
     _upsert("graph_fetch_to_date", req.graph_fetch_to_date.strip())
     if req.graph_client_secret:
         _upsert("graph_client_secret", req.graph_client_secret)
+    record_audit(db, current_user.id, "graph_settings_updated", "system", None,
+                 {"client_id": req.graph_client_id, "mailbox": req.graph_mailbox})
     db.commit()
 
     return {"message": "Graph API settings saved. The ingestion worker will use these on the next poll cycle."}
@@ -654,6 +670,8 @@ def set_email_ingestion_method(
         existing.updated_at = now
     else:
         db.add(SystemSetting(key="email_ingestion_method", value=req.method, updated_at=now))
+    record_audit(db, current_user.id, "ingestion_method_changed", "system", None,
+                 {"method": req.method})
     db.commit()
     return {"method": req.method, "message": f"Email ingestion method set to '{req.method}'."}
 
@@ -749,6 +767,8 @@ def update_email_template(
     else:
         tpl = EmailTemplate(key=key, subject=req.subject, body_text=req.body_text, updated_at=now)
         db.add(tpl)
+    record_audit(db, current_user.id, "email_template_updated", "email_template", None,
+                 {"key": key, "subject": req.subject})
     db.commit()
     db.refresh(tpl)
     return EmailTemplateOut(key=tpl.key, subject=tpl.subject, body_text=tpl.body_text, updated_at=tpl.updated_at)
@@ -765,6 +785,8 @@ def reset_email_template(
     if key not in _TEMPLATE_DEFAULTS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown template key")
     db.query(EmailTemplate).filter(EmailTemplate.key == key).delete()
+    record_audit(db, current_user.id, "email_template_reset", "email_template", None,
+                 {"key": key})
     db.commit()
     defaults = _TEMPLATE_DEFAULTS[key]
     return EmailTemplateOut(key=key, subject=defaults["subject"], body_text=defaults["body_text"], updated_at=None)
@@ -841,5 +863,7 @@ def reclassify_experience_levels(
         if c.experience_level != new_level:
             c.experience_level = new_level
             updated += 1
+    record_audit(db, _current_user.id, "bulk_reclassify_experience", "system", None,
+                 {"updated": updated, "total": len(candidates)})
     db.commit()
     return {"updated": updated, "total": len(candidates)}

@@ -14,6 +14,7 @@ from sqlalchemy import func, desc, asc, or_, select as sa_select
 from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_current_user, get_db
+from app.routers.audit import record_audit
 from app.models import (
     Candidate,
     Evaluation,
@@ -448,6 +449,9 @@ def send_email_to_candidate(
     from app.services.email import send_manual_email
     try:
         send_manual_email(cand.email, cand.name, body.subject, body.body)
+        record_audit(db, current_user.id, "manual_email_sent", "evaluation", evaluation_id,
+                     {"candidate_email": cand.email, "subject": body.subject})
+        db.commit()
         return {"status": "success", "message": "Email sent"}
     except Exception as exc:
         logger.error("Failed to send email to %s: %s", cand.email, exc)
@@ -509,6 +513,9 @@ def send_rejection_email(
         if not sent:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                                 detail="SMTP not configured — rejection email not sent")
+        record_audit(db, current_user.id, "rejection_email_sent", "evaluation", evaluation_id,
+                     {"candidate_email": cand.email})
+        db.commit()
         return {"status": "success", "message": "Rejection email sent"}
     except HTTPException:
         raise
@@ -539,6 +546,8 @@ def delete_all_results(
         db.query(Evaluation).filter(
             Evaluation.job_role_id == job_role_id
         ).delete(synchronize_session=False)
+        record_audit(db, current_user.id, "evaluations_bulk_deleted", "job_role", job_role_id,
+                     {"count": len(eval_ids)})
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -562,6 +571,7 @@ def delete_result(
         db.query(Shortlist).filter(
             Shortlist.evaluation_id == evaluation_id
         ).delete(synchronize_session=False)
+        record_audit(db, current_user.id, "evaluation_deleted", "evaluation", evaluation_id)
         db.delete(ev)
         db.commit()
     except Exception as exc:
@@ -590,6 +600,8 @@ def bulk_delete_results(
         deleted = db.query(Evaluation).filter(
             Evaluation.id.in_(body.ids)
         ).delete(synchronize_session=False)
+        record_audit(db, _current_user.id, "evaluations_bulk_deleted", "evaluation", None,
+                     {"ids": body.ids, "count": deleted})
         db.commit()
         return {"deleted": deleted}
     except Exception as exc:
@@ -640,6 +652,8 @@ def update_resume_sections(
 
     try:
         ev.resume.sections = json.dumps(cleaned)
+        record_audit(db, current_user.id, "resume_sections_updated", "evaluation", evaluation_id,
+                     {"section_count": len(cleaned)})
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -687,6 +701,8 @@ def reclassify_and_rescore(
         for s in sections
     ]
     ev.resume.sections = json.dumps(sections_data)
+    record_audit(db, current_user.id, "reclassify_rescore", "evaluation", evaluation_id,
+                 {"section_count": len(sections_data)})
     db.commit()
 
     # Build weights from job role config then re-score in background
@@ -715,6 +731,8 @@ def update_candidate_stage(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     try:
         cand.stage = body.stage
+        record_audit(db, current_user.id, "candidate_stage_updated", "candidate", candidate_id,
+                     {"stage": body.stage})
         db.commit()
         return {"candidate_id": candidate_id, "stage": body.stage}
     except Exception as exc:
