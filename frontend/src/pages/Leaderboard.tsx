@@ -106,14 +106,13 @@ export default function Leaderboard() {
 
   const [sortKey, setSortKey] = useState<SortKey>(_ss.sortKey ?? 'total_score')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_ss.sortDir ?? 'desc')
-  const [groupByExp, setGroupByExp] = useState(_ss.groupByExp ?? true)
   const [blindMode, setBlindMode] = useState(() => {
     try { return localStorage.getItem('lb-blind-mode') === 'true' } catch { return false }
   })
 
   useEffect(() => {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ sortKey, sortDir, groupByExp }))
-  }, [sortKey, sortDir, groupByExp])
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ sortKey, sortDir }))
+  }, [sortKey, sortDir])
 
 
 
@@ -446,7 +445,7 @@ export default function Leaderboard() {
 
   // Satisfy noUnusedLocals for temporarily disabled UI controls/mutations
   if (false as boolean) {
-    console.log(setGroupByExp, toggleBlindMode, _autoShortlistMut, _reclassifyMut)
+    console.log(toggleBlindMode, _autoShortlistMut, _reclassifyMut)
   }
 
   return (
@@ -560,7 +559,10 @@ export default function Leaderboard() {
         resumeMut={resumeMut}
         exportCSV={exportCSV}
         downloadResultsCsv={downloadResultsCsv}
-        refreshResults={() => queryClient.invalidateQueries({ queryKey: ['results'] })}
+        refreshResults={() => {
+          queryClient.invalidateQueries({ queryKey: ['results'] })
+          queryClient.invalidateQueries({ queryKey: ['results-summary'] })
+        }}
       />
 
       {/* Candidate Grid Table */}
@@ -579,7 +581,7 @@ export default function Leaderboard() {
         sendEmailMut={sendEmailMut}
         emailMsg={emailMsg}
         deleteMutation={deleteMutation}
-        groupByExp={groupByExp}
+        groupByExp={false}
         page={1}
         PAGE_SIZE={PAGE_SIZE}
         sortKey={sortKey}

@@ -44,6 +44,13 @@ export default function EmailIngestion() {
   const [imapFetching, setImapFetching] = useState(false)
   const [imapFetchMsg, setImapFetchMsg] = useState<string | null>(null)
   const [imapStopMsg, setImapStopMsg] = useState<string | null>(null)
+  const [imapActive, setImapActive] = useState(() => {
+    try {
+      return localStorage.getItem('imapFetchActive') === 'true'
+    } catch {
+      return false
+    }
+  })
 
   const { data: imapSettings } = useQuery({
     queryKey: ['imapSettings'],
@@ -107,6 +114,12 @@ export default function EmailIngestion() {
     try {
       const res = await triggerImapFetch()
       setImapFetchMsg(res.message)
+      setImapActive(true)
+      try {
+        localStorage.setItem('imapFetchActive', 'true')
+      } catch (err) {
+        console.error(err)
+      }
       setTimeout(() => {
         setImapFetchMsg(null)
         queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
@@ -125,6 +138,12 @@ export default function EmailIngestion() {
       const res = await stopImapFetch()
       setImapStopMsg(res.message)
       setImapFetchMsg(null)
+      setImapActive(false)
+      try {
+        localStorage.setItem('imapFetchActive', 'false')
+      } catch (err) {
+        console.error(err)
+      }
       setTimeout(() => setImapStopMsg(null), 5000)
     } catch {
       setImapStopMsg('Stop signal failed. Check server logs.')
@@ -148,6 +167,13 @@ export default function EmailIngestion() {
   const [graphFetchMsg, setGraphFetchMsg] = useState<string | null>(null)
   const [graphFetching, setGraphFetching] = useState(false)
   const [stopMsg, setStopMsg] = useState<string | null>(null)
+  const [graphActive, setGraphActive] = useState(() => {
+    try {
+      return localStorage.getItem('graphFetchActive') === 'true'
+    } catch {
+      return false
+    }
+  })
 
   const { data: graphSettings } = useQuery({
     queryKey: ['graphSettings'],
@@ -225,6 +251,12 @@ export default function EmailIngestion() {
     try {
       const res = await triggerGraphFetch(graphFromDate || undefined, graphToDate || undefined)
       setGraphFetchMsg(res.message)
+      setGraphActive(true)
+      try {
+        localStorage.setItem('graphFetchActive', 'true')
+      } catch (err) {
+        console.error(err)
+      }
       setTimeout(() => {
         setGraphFetchMsg(null)
         queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
@@ -243,6 +275,12 @@ export default function EmailIngestion() {
       const res = await stopGraphFetch()
       setStopMsg(res.message)
       setGraphFetchMsg(null)
+      setGraphActive(false)
+      try {
+        localStorage.setItem('graphFetchActive', 'false')
+      } catch (err) {
+        console.error(err)
+      }
       setTimeout(() => setStopMsg(null), 5000)
     } catch {
       setStopMsg('Stop signal failed. Check server logs.')
@@ -443,7 +481,7 @@ export default function EmailIngestion() {
             </button>
             <button
               onClick={handleImapFetchNow}
-              disabled={imapFetching || !imapSettings?.configured}
+              disabled={imapFetching || imapActive || !imapSettings?.configured}
               className="border border-[#1D9E75] text-[#1D9E75] hover:bg-[#E1F5EE] dark:hover:bg-[#0a2e22] disabled:opacity-50 font-semibold rounded-lg px-4 py-2 text-sm transition-colors"
             >
               {imapFetching ? 'Triggering…' : 'Fetch Now'}
@@ -451,7 +489,8 @@ export default function EmailIngestion() {
             {imapSettings?.configured && (
               <button
                 onClick={handleImapStopFetch}
-                className="border border-[#E24B4A] text-[#E24B4A] hover:bg-[#FCEBEB] dark:hover:bg-red-950/30 font-semibold rounded-lg px-4 py-2 text-sm transition-colors flex items-center gap-1.5"
+                disabled={!imapActive}
+                className="border border-[#E24B4A] text-[#E24B4A] hover:bg-[#FCEBEB] dark:hover:bg-red-950/30 disabled:opacity-50 font-semibold rounded-lg px-4 py-2 text-sm transition-colors flex items-center gap-1.5"
                 title="Stop the current IMAP fetch cycle"
               >
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
@@ -602,7 +641,7 @@ export default function EmailIngestion() {
             </button>
             <button
               onClick={handleFetchNow}
-              disabled={graphFetching || !graphSettings?.configured}
+              disabled={graphFetching || graphActive || !graphSettings?.configured}
               className="border border-[#1D9E75] text-[#1D9E75] hover:bg-[#E1F5EE] dark:hover:bg-[#0a2e22] disabled:opacity-50 font-semibold rounded-lg px-4 py-2 text-sm transition-colors"
             >
               {graphFetching ? 'Triggering…' : 'Fetch Now'}
@@ -610,7 +649,8 @@ export default function EmailIngestion() {
             {graphSettings?.configured && (
               <button
                 onClick={handleStopFetch}
-                className="border border-[#E24B4A] text-[#E24B4A] hover:bg-[#FCEBEB] dark:hover:bg-red-950/30 font-semibold rounded-lg px-4 py-2 text-sm transition-colors flex items-center gap-1.5"
+                disabled={!graphActive}
+                className="border border-[#E24B4A] text-[#E24B4A] hover:bg-[#FCEBEB] dark:hover:bg-red-950/30 disabled:opacity-50 font-semibold rounded-lg px-4 py-2 text-sm transition-colors flex items-center gap-1.5"
                 title="Stop the current email fetch cycle (manual or automatic)"
               >
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
