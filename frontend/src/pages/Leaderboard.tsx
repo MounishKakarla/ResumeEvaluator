@@ -244,6 +244,7 @@ export default function Leaderboard() {
     mutationFn: (ids: number[]) => bulkDelete(ids),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['results'] })
+      queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
       setSelectedIds(new Set())
     },
   })
@@ -346,6 +347,7 @@ export default function Leaderboard() {
       queryClient.invalidateQueries({ queryKey: ['results'] })
       queryClient.invalidateQueries({ queryKey: ['resumes'] })
       queryClient.invalidateQueries({ queryKey: ['candidate-search'] })
+      queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
     },
   })
 
@@ -361,6 +363,7 @@ export default function Leaderboard() {
       queryClient.invalidateQueries({ queryKey: ['results'] })
       queryClient.invalidateQueries({ queryKey: ['resumes'] })
       queryClient.invalidateQueries({ queryKey: ['candidate-search'] })
+      queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
     },
     onError: () => {
       alert('Failed to clear results.')

@@ -645,7 +645,7 @@ def get_email_ingestion_method(
     _require_admin(current_user)
     from app.models import SystemSetting
     rows = {r.key: r.value for r in db.query(SystemSetting).all()}
-    return {"method": rows.get("email_ingestion_method") or "auto"}
+    return {"method": rows.get("email_ingestion_method") or "disabled"}
 
 
 class IngestionMethodRequest(BaseModel):

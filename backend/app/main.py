@@ -63,6 +63,13 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # One-time data fix: replace section-header strings stored as candidate names
     fix_section_header_candidate_names()
 
+    # Ensure admin user is seeded and synced with current env credentials
+    try:
+        from app.database import ensure_admin_user
+        ensure_admin_user()
+    except Exception as exc:
+        logger.error("Lifespan admin seeding failed: %s", exc)
+
     # Pre-warm spaCy model
     try:
         from app.services.confidence import _get_nlp

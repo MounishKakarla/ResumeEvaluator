@@ -265,3 +265,34 @@ def fix_section_header_candidate_names() -> None:
         db.rollback()
     finally:
         db.close()
+
+
+def ensure_admin_user() -> None:
+    """Create the admin user from .env on first run if they don't already exist."""
+    import os
+    from app.auth import get_password_hash
+    from app.models import User
+
+    admin_email = os.environ.get("ADMIN_EMAIL", "").strip()
+    admin_password = os.environ.get("ADMIN_PASSWORD", "").strip()
+
+    if not admin_email or not admin_password:
+        return
+
+    db = SessionLocal()
+    try:
+        if db.query(User).filter(User.email == admin_email).first() is None:
+            db.add(User(
+                email=admin_email,
+                hashed_password=get_password_hash(admin_password),
+                role="admin",
+                is_active=True,
+            ))
+            db.commit()
+            print(f"Startup: Created admin user {admin_email}")
+    except Exception as exc:
+        db.rollback()
+        import logging
+        logging.getLogger(__name__).error("Startup ensure_admin_user failed: %s", exc)
+    finally:
+        db.close()

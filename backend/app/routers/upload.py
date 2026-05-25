@@ -10,12 +10,13 @@ from typing import AsyncGenerator, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import decode_token
 from app.config import settings
 from app.deps import get_current_user, get_db
-from app.models import Candidate, Resume, ResumeVersion, User
+from app.models import Candidate, InboundEmail, Resume, ResumeVersion, User
 from app.schemas import UploadResponse
 from app.services.deduplicator import compute_fingerprint, is_duplicate
 from app.services.email_ingestion import extract_external_links
@@ -145,9 +146,14 @@ def _process_resume(
     # --- LLM metadata extraction (Groq/OpenAI — gracefully skipped if not configured) ---
     llm_meta: dict = extract_metadata_via_llm(parsed.text) or {}
 
-    # --- Auto-extract email / name from text if not supplied ---
+    # --- Auto-extract email / name from text ---
+    # Always extract the email written inside the resume (contact section).
+    # This may differ from the sender address and is used as a secondary
+    # candidate-matching key to catch same-person / different-mailbox submissions.
+    resume_email = (llm_meta.get("email") or extract_email(parsed.text) or "").strip().lower() or None
+
     if not candidate_email:
-        candidate_email = llm_meta.get("email") or extract_email(parsed.text)
+        candidate_email = resume_email
     if not candidate_name or candidate_name == filename.rsplit(".", 1)[0]:
         extracted = llm_meta.get("name") or extract_name(parsed.text)
         if extracted:
@@ -185,22 +191,35 @@ def _process_resume(
             )
 
     # --- Locate or create candidate ---
+    # Three-pass lookup so the same person submitting from a different email
+    # address or with a slightly different resume still maps to one record.
     candidate: Candidate | None = None
+
+    # Pass 1: sender / form-provided email
     if candidate_email:
         candidate = db.query(Candidate).filter(Candidate.email == candidate_email).first()
         if candidate is not None and candidate.deleted_at is not None:
-            # Re-activate previously soft-deleted candidate and always refresh
-            # their name from the freshly parsed resume.
             candidate.deleted_at = None
-            if candidate_name:
-                candidate.name = candidate_name
+
+    # Pass 2: email written inside the resume (contact section)
+    if candidate is None and resume_email and resume_email != candidate_email:
+        candidate = db.query(Candidate).filter(Candidate.email == resume_email).first()
+        if candidate is not None and candidate.deleted_at is not None:
+            candidate.deleted_at = None
+
+    # Pass 3: normalized full-name match (same person, different email account)
+    if candidate is None and candidate_name:
+        _norm_name = candidate_name.strip().lower()
+        candidate = db.query(Candidate).filter(
+            Candidate.deleted_at.is_(None),
+            func.lower(func.trim(Candidate.name)) == _norm_name,
+        ).first()
 
     if candidate is None:
         candidate = Candidate(name=candidate_name, email=candidate_email, source=source)
         db.add(candidate)
-        db.flush()  # get id before referencing it
+        db.flush()
     else:
-        # Update name if we have a better one
         if candidate_name and candidate.name in ("", "Unknown"):
             candidate.name = candidate_name
 
@@ -607,9 +626,14 @@ def delete_resume(
     from app.models import Resume, Evaluation
     resume = db.query(Resume).filter(Resume.id == resume_id).first()
     if resume:
-        # Delete evaluations linked to this resume
         db.query(Evaluation).filter(Evaluation.resume_id == resume.id).delete()
         db.delete(resume)
+
+    # Delete the inbound email log entry for this candidate
+    if candidate and candidate.email:
+        db.query(InboundEmail).filter(
+            InboundEmail.sender_email == candidate.email
+        ).delete(synchronize_session=False)
 
     db.delete(rv)
     db.flush()
@@ -645,17 +669,20 @@ def delete_all_resumes(
     # 2. Delete all Evaluation records
     from app.models import Evaluation, Resume
     db.query(Evaluation).delete()
-    
+
     # 3. Delete all Resume records (parsed content)
     db.query(Resume).delete()
-    
+
     # 4. Delete all ResumeVersion records
     db.query(ResumeVersion).delete()
-    
-    # 5. Set current_version_id to None on all candidates
+
+    # 5. Delete all inbound email log entries
+    db.query(InboundEmail).delete()
+
+    # 6. Set current_version_id to None on all candidates
     db.query(Candidate).update({"current_version_id": None})
-    
-    # 6. Soft-delete all candidates (as they have no remaining resume versions)
+
+    # 7. Soft-delete all candidates (as they have no remaining resume versions)
     from datetime import datetime, timezone
     db.query(Candidate).update({"deleted_at": datetime.now(timezone.utc)})
     

@@ -144,6 +144,11 @@ export default function EmailIngestion() {
       } catch (err) {
         console.error(err)
       }
+      try {
+        await setIngestionMethod('disabled')
+        setSelectedMethod('disabled')
+        queryClient.invalidateQueries({ queryKey: ['ingestionMethod'] })
+      } catch { /* non-fatal */ }
       setTimeout(() => setImapStopMsg(null), 5000)
     } catch {
       setImapStopMsg('Stop signal failed. Check server logs.')
@@ -281,6 +286,11 @@ export default function EmailIngestion() {
       } catch (err) {
         console.error(err)
       }
+      try {
+        await setIngestionMethod('disabled')
+        setSelectedMethod('disabled')
+        queryClient.invalidateQueries({ queryKey: ['ingestionMethod'] })
+      } catch { /* non-fatal */ }
       setTimeout(() => setStopMsg(null), 5000)
     } catch {
       setStopMsg('Stop signal failed. Check server logs.')
@@ -289,7 +299,7 @@ export default function EmailIngestion() {
   }
 
   // Ingestion method selector
-  const [selectedMethod, setSelectedMethod] = useState<IngestionMethod>('auto')
+  const [selectedMethod, setSelectedMethod] = useState<IngestionMethod>('disabled')
   const [methodSaveMsg, setMethodSaveMsg] = useState<string | null>(null)
 
   const { data: ingestionMethodData } = useQuery({

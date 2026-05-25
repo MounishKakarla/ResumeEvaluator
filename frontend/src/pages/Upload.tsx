@@ -108,6 +108,7 @@ export default function Upload() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['resumes'] })
       queryClient.invalidateQueries({ queryKey: ['results'] })
+      queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
     },
   })
 
@@ -117,6 +118,7 @@ export default function Upload() {
       queryClient.invalidateQueries({ queryKey: ['resumes'] })
       queryClient.invalidateQueries({ queryKey: ['results'] })
       queryClient.invalidateQueries({ queryKey: ['candidate-search'] })
+      queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
     },
     onError: () => {
       alert('Failed to delete all resumes.')
