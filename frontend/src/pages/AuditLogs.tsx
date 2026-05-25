@@ -109,15 +109,25 @@ export default function AuditLogs() {
                       </td>
                       <td className="px-4 py-2.5 text-xs text-gray-500 dark:text-gray-400 max-w-xs">
                         {entry.details
-                          ? Object.entries(entry.details).map(([field, [oldVal, newVal]]) => (
-                              <span key={field} className="mr-2 whitespace-nowrap">
-                                <span className="font-medium text-gray-700 dark:text-gray-300">{field}</span>
-                                {': '}
-                                <span className="line-through text-gray-400">{String(oldVal ?? '—')}</span>
-                                {' → '}
-                                <span className="text-gray-700 dark:text-gray-200">{String(newVal ?? '—')}</span>
-                              </span>
-                            ))
+                          ? Object.entries(entry.details).map(([field, val]) => {
+                              const isPair = Array.isArray(val) && val.length === 2
+                              const oldVal = isPair ? val[0] : undefined
+                              const newVal = isPair ? val[1] : val
+
+                              return (
+                                <span key={field} className="mr-2 whitespace-nowrap">
+                                  <span className="font-medium text-gray-700 dark:text-gray-300">{field}</span>
+                                  {': '}
+                                  {isPair ? (
+                                    <>
+                                      <span className="line-through text-gray-400">{String(oldVal ?? '—')}</span>
+                                      {' → '}
+                                    </>
+                                  ) : null}
+                                  <span className="text-gray-700 dark:text-gray-200">{String(newVal ?? '—')}</span>
+                                </span>
+                              )
+                            })
                           : <span className="italic text-gray-400">—</span>
                         }
                       </td>

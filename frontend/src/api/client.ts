@@ -1295,7 +1295,7 @@ export interface AuditLogEntry {
   action: string
   target_type: string | null
   target_id: number | null
-  details: Record<string, [unknown, unknown]> | null
+  details: Record<string, any> | null
   timestamp: string
 }
 
