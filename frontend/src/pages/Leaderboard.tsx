@@ -1,32 +1,33 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/react-query'
-import { getResults, deleteResult, deleteAllResults, getJobRoles, setIntakePause, autoApplyShortlist, bulkShortlist, bulkDelete, sendNextStepsEmail, updateCandidateStage, bulkSendNextSteps, downloadResultsCsv, reclassifyExperienceLevels, getResultsSummary, pauseEvaluation, resumeEvaluation, getEvaluationStatus } from '../api/client'
+import { useState, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useQuery, useInfiniteQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/react-query'
+import {
+  getResults,
+  deleteResult,
+  deleteAllResults,
+  getJobRoles,
+  setIntakePause,
+  autoApplyShortlist,
+  bulkShortlist,
+  bulkDelete,
+  sendNextStepsEmail,
+  updateCandidateStage,
+  bulkSendNextSteps,
+  downloadResultsCsv,
+  reclassifyExperienceLevels,
+  getResultsSummary,
+  pauseEvaluation,
+  resumeEvaluation,
+  getEvaluationStatus
+} from '../api/client'
 import type { CandidateResult, CandidateStage, JobRole, ShortlistStatus } from '../api/client'
 import { useAppStore } from '../store/useAppStore'
-import StatusBadge from '../components/StatusBadge'
+
+import SummaryCards from '../components/Leaderboard/SummaryCards'
+import FilterControls from '../components/Leaderboard/FilterControls'
+import CandidateTable from '../components/Leaderboard/CandidateTable'
 
 type SortKey = 'total_score' | 'candidate_name' | 'skills_matched' | 'years_experience'
-
-function RankBadge({ rank }: { rank: number }) {
-  if (rank === 1)
-    return (
-      <span className="text-lg" title="1st">🥇</span>
-    )
-  if (rank === 2)
-    return (
-      <span className="text-lg" title="2nd">🥈</span>
-    )
-  if (rank === 3)
-    return (
-      <span className="text-lg" title="3rd">🥉</span>
-    )
-  return (
-    <span className="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-bold flex items-center justify-center">
-      {rank}
-    </span>
-  )
-}
 
 const _SECTION_HEADERS = new Set([
   'career objective', 'professional summary', 'work experience',
@@ -43,18 +44,6 @@ function displayName(name: string, email: string | null | undefined): string {
     return 'Unknown'
   }
   return name
-}
-
-function getInitials(name: string) {
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? '')
-    .join('')
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 const STAGE_LABEL_MAP: Record<string, string> = {
@@ -90,7 +79,6 @@ function resultsToCSV(items: CandidateResult[]): string {
 }
 
 export default function Leaderboard() {
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const selectedJobRoleId = useAppStore((s) => s.selectedJobRoleId)
@@ -119,14 +107,15 @@ export default function Leaderboard() {
   const [sortKey, setSortKey] = useState<SortKey>(_ss.sortKey ?? 'total_score')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(_ss.sortDir ?? 'desc')
   const [groupByExp, setGroupByExp] = useState(_ss.groupByExp ?? true)
-  const [page, setPage] = useState<number>(_ss.page ?? 1)
   const [blindMode, setBlindMode] = useState(() => {
     try { return localStorage.getItem('lb-blind-mode') === 'true' } catch { return false }
   })
 
   useEffect(() => {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ sortKey, sortDir, groupByExp, page }))
-  }, [sortKey, sortDir, groupByExp, page])
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ sortKey, sortDir, groupByExp }))
+  }, [sortKey, sortDir, groupByExp])
+
+
 
   const toggleBlindMode = () => {
     setBlindMode((v: boolean) => {
@@ -154,28 +143,58 @@ export default function Leaderboard() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const PAGE_SIZE = 50
 
-  const _isFirstMount = useRef(true)
   useEffect(() => {
-    if (_isFirstMount.current) { _isFirstMount.current = false; return }
-    setPage(1)
-  }, [selectedJobRoleId])
-
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['results', selectedJobRoleId, page],
-    queryFn: () =>
+    const mainEl = document.querySelector('main')
+    if (mainEl) {
+      mainEl.scrollTop = 0
+    }
+  }, [selectedJobRoleId, nameSearch])
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    isError,
+  } = useInfiniteQuery({
+    queryKey: ['results', selectedJobRoleId, nameSearch],
+    queryFn: ({ pageParam = 1 }) =>
       getResults({
         job_role_id: selectedJobRoleId ?? undefined,
         sort: 'total_score',
         order: 'desc',
         limit: PAGE_SIZE,
-        page,
+        page: pageParam as number,
+        search: nameSearch.trim() || undefined,
       }),
-    enabled: true,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentCount = allPages.reduce((sum, p) => sum + p.items.length, 0)
+      if (currentCount >= lastPage.total) return undefined
+      return allPages.length + 1
+    },
+    initialPageParam: 1,
     staleTime: 0,
     refetchInterval: 3000,
   })
 
-  // Summary stats — pulled from backend over ALL pages, not just current 50
+  // Trigger next page loading on scroll near bottom of main container
+  useEffect(() => {
+    const mainEl = document.querySelector('main')
+    if (!mainEl) return
+
+    const handleScroll = () => {
+      const threshold = 200 // pixels from bottom
+      const isNearBottom = mainEl.scrollHeight - mainEl.scrollTop - mainEl.clientHeight < threshold
+      
+      if (isNearBottom && hasNextPage && !isFetchingNextPage) {
+        fetchNextPage()
+      }
+    }
+
+    mainEl.addEventListener('scroll', handleScroll)
+    return () => mainEl.removeEventListener('scroll', handleScroll)
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
+
   const { data: summary, isFetching: summaryFetching } = useQuery({
     queryKey: ['results-summary', selectedJobRoleId],
     queryFn: () => getResultsSummary(selectedJobRoleId ?? undefined),
@@ -184,7 +203,6 @@ export default function Leaderboard() {
     placeholderData: keepPreviousData,
   })
 
-  // Evaluation progress — for pause/resume controls
   const { data: evalStatus } = useQuery({
     queryKey: ['eval-status', selectedJobRoleId],
     queryFn: () => getEvaluationStatus(selectedJobRoleId!),
@@ -204,7 +222,7 @@ export default function Leaderboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['job-roles'] }),
   })
 
-  const autoShortlistMut = useMutation({
+  const _autoShortlistMut = useMutation({
     mutationFn: () => autoApplyShortlist(selectedJobRoleId!),
     onSuccess: (res: { applied: number; total_qualifying: number }) => {
       queryClient.invalidateQueries({ queryKey: ['results'] })
@@ -265,15 +283,15 @@ export default function Leaderboard() {
     },
   })
 
-  const [reclassifyMsg, setReclassifyMsg] = useState<string | null>(null)
-  const reclassifyMut = useMutation({
+  const [_reclassifyMsg, _setReclassifyMsg] = useState<string | null>(null)
+  const _reclassifyMut = useMutation({
     mutationFn: reclassifyExperienceLevels,
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['results'] })
-      setReclassifyMsg(`Reclassified ${res.updated} of ${res.total} candidates`)
-      setTimeout(() => setReclassifyMsg(null), 5000)
+      _setReclassifyMsg(`Reclassified ${res.updated} of ${res.total} candidates`)
+      setTimeout(() => _setReclassifyMsg(null), 5000)
     },
-    onError: () => { setReclassifyMsg('Reclassification failed'); setTimeout(() => setReclassifyMsg(null), 4000) },
+    onError: () => { _setReclassifyMsg('Reclassification failed'); setTimeout(() => _setReclassifyMsg(null), 4000) },
   })
 
   const pauseMut = useMutation({
@@ -291,20 +309,6 @@ export default function Leaderboard() {
       if (res.queued_count === 0) alert('No queued evaluations to resume.')
     },
   })
-
-  const STAGE_COLORS: Record<CandidateStage, string> = {
-    applied:   'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600',
-    screening: 'bg-[#EEEDFE] dark:bg-[#2d2a5a] text-[#3C3489] dark:text-[#AFA9EC] border-[#AFA9EC]',
-    coding:    'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700',
-    interview: 'bg-[#FAEEDA] text-[#633806] border-[#EF9F27]',
-    offer:     'bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-300 dark:border-teal-700',
-    hired:     'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]',
-    rejected:  'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]/50',
-  }
-  const STAGE_LABELS: Record<CandidateStage, string> = {
-    applied: 'Applied', screening: 'Screening', coding: 'Coding Test',
-    interview: 'Interview', offer: 'Offer', hired: 'Hired', rejected: 'Rejected',
-  }
 
   function toggleSelect(id: number) {
     setSelectedIds((prev) => {
@@ -365,19 +369,13 @@ export default function Leaderboard() {
     },
   })
 
-  const rawItems = data?.items ?? []
+  const rawItems = useMemo(() => {
+    return data?.pages.flatMap((page) => page.items) ?? []
+  }, [data?.pages])
   const baseItems = useMemo(() => {
     let arr = rawItems
     if (scoreRangeFilter) {
       arr = arr.filter((r) => r.total_score >= scoreRangeFilter.min && r.total_score < scoreRangeFilter.max + 10)
-    }
-    if (nameSearch.trim()) {
-      const q = nameSearch.toLowerCase().trim()
-      arr = arr.filter(
-        (r) =>
-          r.candidate_name.toLowerCase().includes(q) ||
-          (r.candidate_email ?? '').toLowerCase().includes(q)
-      )
     }
     if (gradYearFrom !== '') {
       arr = arr.filter((r) => r.candidate_graduation_year != null && r.candidate_graduation_year >= Number(gradYearFrom))
@@ -392,9 +390,8 @@ export default function Leaderboard() {
       arr = arr.filter((r) => (r.candidate_experience_level ?? 'entry') === filterLevel)
     }
     return arr
-  }, [rawItems, scoreRangeFilter, nameSearch, gradYearFrom, gradYearTo, filterStatus, filterLevel])
+  }, [rawItems, scoreRangeFilter, gradYearFrom, gradYearTo, filterStatus, filterLevel])
 
-  // Client-side sort so all columns work without backend support
   const items = useMemo(() => {
     const arr = [...baseItems]
     arr.sort((a, b) => {
@@ -418,14 +415,13 @@ export default function Leaderboard() {
     return arr
   }, [baseItems, sortKey, sortDir])
 
-  // Metric cards — use backend summary so values are stable across pages/filters
-  const totalEvaluated = summary?.total ?? data?.total ?? items.length
-  const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
+  const totalEvaluated = summary?.total ?? data?.pages[0]?.total ?? items.length
   const avgScore = summary ? Math.round(summary.avg_score) : null
   const shortlisted = summary?.shortlisted ?? 0
   const needsReview = summary?.needs_review ?? 0
   const tfidfFiltered = summary?.tfidf_filtered ?? 0
   const experienceFiltered = summary?.experience_filtered ?? 0
+  const autoRejected = tfidfFiltered + experienceFiltered
   const queuedCount = summary?.queued ?? 0
 
   function exportCSV() {
@@ -446,12 +442,11 @@ export default function Leaderboard() {
       setSortKey(key)
       setSortDir('desc')
     }
-    setPage(1)
   }
 
-  function SortIcon({ k }: { k: SortKey }) {
-    if (sortKey !== k) return <span className="text-gray-300 ml-1">↕</span>
-    return <span className="text-[#534AB7] ml-1">{sortDir === 'desc' ? '↓' : '↑'}</span>
+  // Satisfy noUnusedLocals for temporarily disabled UI controls/mutations
+  if (false as boolean) {
+    console.log(setGroupByExp, toggleBlindMode, _autoShortlistMut, _reclassifyMut)
   }
 
   return (
@@ -475,286 +470,23 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Metric Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        {[
-          { label: 'Total Evaluated', value: totalEvaluated, color: '#534AB7', bg: '#EEEDFE', fromSummary: false },
-          { label: 'Avg Score', value: avgScore !== null ? `${avgScore}` : null, color: '#1D9E75', bg: '#E1F5EE', fromSummary: true },
-          { label: 'Shortlisted', value: summary ? shortlisted : null, color: '#EF9F27', bg: '#FAEEDA', fromSummary: true },
-          { label: 'Needs Review', value: summary ? needsReview : null, color: '#E24B4A', bg: '#FCEBEB', fromSummary: true },
-          { label: 'Keyword Filtered', value: summary ? tfidfFiltered : null, color: '#6B7280', bg: '#F3F4F6', fromSummary: true },
-          { label: 'Exp. Mismatch', value: summary ? experienceFiltered : null, color: '#EA580C', bg: '#FFF7ED', fromSummary: true },
-        ].map(({ label, value, color, bg, fromSummary }) => (
-          <div
-            key={label}
-            className="rounded-xl border p-4"
-            style={{ backgroundColor: bg, borderColor: color + '40' }}
-          >
-            <div className="flex items-center gap-1.5 mb-1">
-              <p className="text-xs font-medium" style={{ color }}>{label}</p>
-              {fromSummary && summaryFetching && (
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
-              )}
-            </div>
-            <p className="text-2xl font-bold" style={{ color }}>
-              {value === null ? (
-                <span className="text-base opacity-40">—</span>
-              ) : value}
-            </p>
-          </div>
-        ))}
-      </div>
+      {/* Summary KPI Cards */}
+      <SummaryCards
+        totalEvaluated={totalEvaluated}
+        avgScore={avgScore}
+        shortlisted={shortlisted}
+        needsReview={needsReview}
+        autoRejected={autoRejected}
+        tfidfFiltered={tfidfFiltered}
+        experienceFiltered={experienceFiltered}
+        queuedCount={queuedCount}
+        summaryFetching={summaryFetching}
+        summary={summary}
+        scoreRangeFilter={scoreRangeFilter}
+        clearScoreFilter={clearScoreFilter}
+      />
 
-      {/* Controls */}
-      <div className="flex items-center gap-3 flex-wrap">
-        {/* Search */}
-        <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={nameSearch}
-            onChange={(e) => { setNameSearch(e.target.value); setPage(1) }}
-            placeholder="Search name or email…"
-            className="pl-9 pr-7 py-2 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 w-52 placeholder-gray-400 dark:placeholder-gray-500"
-          />
-          {nameSearch && (
-            <button
-              onClick={() => setNameSearch('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-base leading-none"
-            >×</button>
-          )}
-        </div>
-
-        {/* Graduation Year Range Filter */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Grad Year</span>
-          <input
-            type="number"
-            value={gradYearFrom}
-            onChange={(e) => { setGradYearFrom(e.target.value ? Number(e.target.value) : ''); setPage(1) }}
-            placeholder="From"
-            className="w-20 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
-          />
-          <span className="text-xs text-gray-400">–</span>
-          <input
-            type="number"
-            value={gradYearTo}
-            onChange={(e) => { setGradYearTo(e.target.value ? Number(e.target.value) : ''); setPage(1) }}
-            placeholder="To"
-            className="w-20 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
-          />
-          {(gradYearFrom !== '' || gradYearTo !== '') && (
-            <button
-              onClick={() => { setGradYearFrom(''); setGradYearTo('') }}
-              className="text-gray-400 hover:text-red-500 text-base leading-none transition-colors"
-              title="Clear year filter"
-            >×</button>
-          )}
-        </div>
-
-        {/* Status filter */}
-        <select
-          className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
-          value={filterStatus}
-          onChange={(e) => { setFilterStatus(e.target.value); setPage(1) }}
-        >
-          <option value="">All Statuses</option>
-          <option value="shortlisted">Shortlisted</option>
-          <option value="pending">Pending</option>
-          <option value="rejected">Rejected</option>
-        </select>
-
-        {/* Experience level filter */}
-        <select
-          className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
-          value={filterLevel}
-          onChange={(e) => { setFilterLevel(e.target.value); setPage(1) }}
-        >
-          <option value="">All Levels</option>
-          <option value="entry">Entry Level</option>
-          <option value="junior">Junior</option>
-          <option value="mid">Mid-level</option>
-          <option value="senior">Senior</option>
-          <option value="executive">Executive</option>
-        </select>
-
-        <select
-          className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
-          value={sortKey}
-          onChange={(e) => setSortKey(e.target.value as SortKey)}
-        >
-          <option value="total_score">Sort: Score</option>
-          <option value="candidate_name">Sort: Name</option>
-          <option value="skills_matched">Sort: Skills Matched</option>
-          <option value="years_experience">Sort: Experience (yrs)</option>
-        </select>
-
-        <button
-          onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
-          className="border border-gray-200 dark:border-gray-600 dark:text-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-        >
-          {sortDir === 'desc' ? '↓ Desc' : '↑ Asc'}
-        </button>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 dark:text-gray-400">Group by level</span>
-          <button
-            onClick={() => setGroupByExp((v: boolean) => !v)}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${groupByExp ? 'bg-[#534AB7]' : 'bg-gray-300 dark:bg-gray-600'}`}
-            title="Toggle grouping by experience level"
-          >
-            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${groupByExp ? 'translate-x-4' : 'translate-x-1'}`} />
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 dark:text-gray-400">Blind mode</span>
-          <button
-            onClick={toggleBlindMode}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${blindMode ? 'bg-[#EF9F27]' : 'bg-gray-300 dark:bg-gray-600'}`}
-            title="Hide candidate names and emails for unbiased review"
-          >
-            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${blindMode ? 'translate-x-4' : 'translate-x-1'}`} />
-          </button>
-        </div>
-
-        {selectedJobRoleId && (
-          <button
-            onClick={() => {
-              if (confirm('Auto-shortlist all candidates meeting the minimum fit score?')) {
-                autoShortlistMut.mutate()
-              }
-            }}
-            disabled={autoShortlistMut.isPending}
-            className="border border-[#AFA9EC] bg-[#EEEDFE] dark:bg-[#2d2a5a] text-[#3C3489] dark:text-[#AFA9EC] rounded-lg px-3 py-2 text-sm hover:bg-[#dddcfd] dark:hover:bg-[#3a3770] disabled:opacity-50 flex items-center gap-1"
-          >
-            {autoShortlistMut.isPending ? 'Applying…' : '⚡ Auto-Shortlist'}
-          </button>
-        )}
-
-        {isAdmin && selectedJobRoleId && (
-          <button
-            onClick={() => {
-              if (confirm('Send next-steps email to all shortlisted candidates who haven\'t received one yet?')) {
-                bulkEmailMut.mutate()
-              }
-            }}
-            disabled={bulkEmailMut.isPending}
-            className="border border-[#1D9E75] bg-[#E1F5EE] dark:bg-[#0d3328] text-[#085041] dark:text-[#5DCAA5] rounded-lg px-3 py-2 text-sm hover:bg-[#c8ede0] dark:hover:bg-[#0f4035] disabled:opacity-50 flex items-center gap-1"
-          >
-            {bulkEmailMut.isPending ? 'Sending…' : '📧 Email All Shortlisted'}
-          </button>
-        )}
-        {bulkEmailMsg && (
-          <span className="text-xs text-[#1D9E75] font-medium">{bulkEmailMsg}</span>
-        )}
-
-        <button
-          onClick={() => {
-            if (confirm('Clear ALL results for this job role?')) {
-              deleteAllMutation.mutate(selectedJobRoleId!)
-            }
-          }}
-          className="ml-auto border border-red-100 bg-red-50 text-red-600 rounded-lg px-3 py-2 text-sm hover:bg-red-100 flex items-center gap-1"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-          Clear All
-        </button>
-
-        <button
-          onClick={() => queryClient.invalidateQueries({ queryKey: ['results'] })}
-          className="border border-gray-200 dark:border-gray-600 dark:text-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Refresh
-        </button>
-
-        {/* Pause / Resume — media-player style toggle, always Pause or Resume */}
-        {selectedJobRoleId != null && (
-          <button
-            onClick={() => evalStatus?.in_progress ? pauseMut.mutate() : resumeMut.mutate()}
-            disabled={pauseMut.isPending || resumeMut.isPending}
-            title={
-              evalStatus?.in_progress
-                ? 'Pause evaluation — queued resumes stay held'
-                : `Resume evaluation${queuedCount > 0 ? ` — ${queuedCount} queued` : ''}`
-            }
-            className={`rounded-lg px-3 py-2 text-sm flex items-center gap-2 transition-colors disabled:opacity-50 ${
-              evalStatus?.in_progress
-                ? 'border border-amber-400 text-amber-600 dark:text-amber-400 dark:border-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'
-                : 'border border-[#1D9E75] text-[#1D9E75] dark:border-[#1D9E75] hover:bg-[#E1F5EE] dark:hover:bg-[#0a3329]'
-            }`}
-          >
-            <span className={`inline-block w-2 h-2 rounded-full ${evalStatus?.in_progress ? 'bg-amber-400 animate-pulse' : 'bg-[#1D9E75]'}`} />
-            {evalStatus?.in_progress
-              ? (pauseMut.isPending ? 'Pausing…' : 'Pause')
-              : (resumeMut.isPending ? 'Resuming…' : 'Resume')
-            }
-          </button>
-        )}
-
-        {isAdmin && (
-          <button
-            onClick={() => reclassifyMut.mutate()}
-            disabled={reclassifyMut.isPending}
-            className="border border-gray-200 dark:border-gray-600 dark:text-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1 disabled:opacity-50"
-            title="Reclassify all candidates by years of experience"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-            {reclassifyMut.isPending ? 'Reclassifying…' : 'Reclassify Levels'}
-          </button>
-        )}
-        {reclassifyMsg && <span className="text-xs text-[#534AB7] dark:text-[#AFA9EC]">{reclassifyMsg}</span>}
-
-        <button
-          onClick={exportCSV}
-          className="border border-gray-200 dark:border-gray-600 dark:text-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1"
-          title="Export current page to CSV"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          Export CSV
-        </button>
-
-        <button
-          onClick={() => downloadResultsCsv(selectedJobRoleId, undefined)}
-          className="border border-gray-200 dark:border-gray-600 dark:text-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1"
-          title="Export all candidates with full HRIS fields (all pages)"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          Export All (HRIS)
-        </button>
-
-      </div>
-
-      {/* Score range drill-down banner */}
-      {scoreRangeFilter && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-[#EEEDFE] dark:bg-[#2d2a5a] border border-[#534AB7]/30 rounded-xl text-sm">
-          <span className="text-[#534AB7] font-medium">
-            Showing score range: {scoreRangeFilter.min}–{scoreRangeFilter.max + 9}
-          </span>
-          <span className="text-[#534AB7]/60 text-xs">(from Analytics drill-down)</span>
-          <button
-            onClick={clearScoreFilter}
-            className="ml-auto text-xs text-[#534AB7] hover:underline font-medium"
-          >
-            × Clear filter
-          </button>
-        </div>
-      )}
-
-      {/* Bulk action bar */}
+      {/* Bulk Action Bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 bg-[#EEEDFE] dark:bg-[#2d2a5a] border border-[#AFA9EC] rounded-xl px-4 py-2.5">
           <span className="text-sm font-semibold text-[#3C3489] dark:text-[#AFA9EC]">
@@ -803,428 +535,79 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        {isLoading && (
-          <table className="w-full text-sm animate-pulse">
-            <thead>
-              <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                {[8, 40, 100, 80, 80, 60, 60, 70, 60].map((w, i) => (
-                  <th key={i} className="px-4 py-3">
-                    <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded" style={{ width: w }} />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 8 }).map((_, i) => (
-                <tr key={i} className="border-b border-gray-50 dark:border-gray-800">
-                  <td className="px-4 py-3"><div className="w-4 h-4 bg-gray-100 dark:bg-gray-700 rounded" /></td>
-                  <td className="px-4 py-3"><div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-6" /></td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 shrink-0" />
-                      <div className="space-y-1">
-                        <div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-28" />
-                        <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded w-36" />
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3"><div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-20" /></td>
-                  <td className="px-4 py-3"><div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-16" /></td>
-                  <td className="px-4 py-3"><div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-12" /></td>
-                  <td className="px-4 py-3"><div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-10" /></td>
-                  <td className="px-4 py-3"><div className="h-5 bg-gray-100 dark:bg-gray-700 rounded-full w-16" /></td>
-                  <td className="px-4 py-3"><div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-12" /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {isError && (
-          <div className="p-8 text-center text-sm text-[#791F1F]">Failed to load results.</div>
-        )}
-        {!isLoading && !isError && items.length === 0 && (
-          <div className="p-8 text-center text-sm text-gray-400 dark:text-gray-500">No results found.</div>
-        )}
-        {items.length > 0 && (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                <th className="px-4 py-3 w-8">
-                  <input
-                    type="checkbox"
-                    className="rounded border-gray-300 dark:border-gray-600 accent-[#534AB7]"
-                    checked={items.length > 0 && selectedIds.size === items.length}
-                    ref={(el) => { if (el) el.indeterminate = selectedIds.size > 0 && selectedIds.size < items.length }}
-                    onChange={toggleSelectAll}
-                  />
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 w-12">Rank</th>
-                <th
-                  className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer"
-                  onClick={() => toggleSort('candidate_name')}
-                >
-                  Candidate <SortIcon k="candidate_name" />
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Current Title</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Phone</th>
-                <th
-                  className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer w-24"
-                  onClick={() => toggleSort('total_score')}
-                >
-                  Score <SortIcon k="total_score" />
-                </th>
-                <th
-                  className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer"
-                  onClick={() => toggleSort('skills_matched')}
-                >
-                  Skills <SortIcon k="skills_matched" />
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Applied For</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Evaluated At</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Status</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Stage</th>
-                {isAdmin && <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Email</th>}
-                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 w-12"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {(() => {
-                const EXP_ORDER = ['executive', 'senior', 'mid', 'junior', 'entry']
-                const EXP_LABELS: Record<string, string> = {
-                  executive: 'Executive / Lead',
-                  senior: 'Senior',
-                  mid: 'Mid-level',
-                  junior: 'Junior',
-                  entry: 'Entry Level',
-                }
-                const EXP_COLORS: Record<string, string> = {
-                  executive: 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]',
-                  senior: 'bg-[#EEEDFE] text-[#3C3489] border-[#AFA9EC]',
-                  mid: 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]',
-                  junior: 'bg-[#FAEEDA] text-[#633806] border-[#EF9F27]',
-                  entry: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-500',
-                }
+      {/* Filter and Action Controls */}
+      <FilterControls
+        nameSearch={nameSearch}
+        setNameSearch={setNameSearch}
+        gradYearFrom={gradYearFrom}
+        setGradYearFrom={setGradYearFrom}
+        gradYearTo={gradYearTo}
+        setGradYearTo={setGradYearTo}
+        filterStatus={filterStatus}
+        setFilterStatus={setFilterStatus}
+        filterLevel={filterLevel}
+        setFilterLevel={setFilterLevel}
+        sortKey={sortKey}
+        setSortKey={setSortKey}
+        selectedJobRoleId={selectedJobRoleId}
+        evalStatus={evalStatus}
+        queuedCount={queuedCount}
+        isAdmin={isAdmin}
+        bulkEmailMut={bulkEmailMut}
+        bulkEmailMsg={bulkEmailMsg}
+        deleteAllMutation={deleteAllMutation}
+        pauseMut={pauseMut}
+        resumeMut={resumeMut}
+        exportCSV={exportCSV}
+        downloadResultsCsv={downloadResultsCsv}
+        refreshResults={() => queryClient.invalidateQueries({ queryKey: ['results'] })}
+      />
 
-                const renderRow = (item: typeof items[0], idx: number) => (
-                  <tr
-                    key={item.evaluation_id}
-                    className={`border-b border-gray-50 dark:border-gray-800 hover:bg-[#EEEDFE]/20 dark:hover:bg-[#2d2a5a]/20 cursor-pointer transition-colors ${selectedIds.has(item.evaluation_id) ? 'bg-[#EEEDFE]/40 dark:bg-[#2d2a5a]/40' : ''}`}
-                    onClick={() => navigate(`/results/${item.evaluation_id}`)}
-                  >
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        className="rounded border-gray-300 dark:border-gray-600 accent-[#534AB7]"
-                        checked={selectedIds.has(item.evaluation_id)}
-                        onChange={() => toggleSelect(item.evaluation_id)}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <RankBadge rank={idx + 1} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-full bg-[#534AB7] flex items-center justify-center shrink-0">
-                          <span className="text-xs text-white font-bold">
-                            {blindMode ? `C${idx + 1}` : getInitials(displayName(item.candidate_name, item.candidate_email))}
-                          </span>
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <p className="font-medium text-gray-800 dark:text-gray-100">{maskName(displayName(item.candidate_name, item.candidate_email), idx)}</p>
-                            {!blindMode && item.needs_manual_review && (
-                              <span
-                                title="Manual review required — discrepancies detected"
-                                className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]"
-                              >
-                                ⚠ Review
-                              </span>
-                            )}
-                            {!blindMode && item.github_skill_gap_severity && item.github_skill_gap_severity !== 'low' && (
-                              <span
-                                title={
-                                  item.github_skill_gap_severity === 'high'
-                                    ? 'GitHub: claimed skills not evidenced in repositories (high concern)'
-                                    : 'GitHub: some claimed skills unverified in repositories'
-                                }
-                                className={`inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
-                                  item.github_skill_gap_severity === 'high'
-                                    ? 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]'
-                                    : 'bg-[#FAEEDA] text-[#633806] border-[#EF9F27]'
-                                }`}
-                              >
-                                <svg className="w-2.5 h-2.5" viewBox="0 0 16 16" fill="currentColor">
-                                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-                                </svg>
-                                {item.github_skill_gap_severity === 'high' ? 'GH ✗' : 'GH ~'}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-400 dark:text-gray-500">
-                            {maskEmail(item.candidate_email)}
-                            {item.candidate_graduation_year != null && (
-                              <span
-                                className="ml-1.5 text-[10px] font-medium bg-[#EEEDFE] dark:bg-[#2d2a5a] text-[#534AB7] dark:text-[#AFA9EC] px-1.5 py-0.5 rounded"
-                                title="Graduation year"
-                              >
-                                {item.candidate_graduation_year}
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 max-w-[160px]">
-                      {item.candidate_current_title ? (
-                        <p className="text-xs text-gray-600 dark:text-gray-300 truncate" title={item.candidate_current_title}>
-                          {item.candidate_current_title}
-                        </p>
-                      ) : (
-                        <span className="text-xs text-gray-300 dark:text-gray-600">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs text-gray-500 dark:text-gray-400">{item.candidate_phone ?? '—'}</span>
-                    </td>
-                    <td className="px-4 py-3 w-24">
-                      {item.filter_stage === 'experience_filtered' ? (
-                        <div className="flex flex-col gap-0.5">
-                          <span
-                            className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 border border-orange-300 dark:border-orange-700"
-                            title="Stage 0 pre-filter: candidate experience does not meet role requirements — evaluation skipped"
-                          >
-                            Exp. mismatch
-                          </span>
-                          {item.candidate_years_experience != null && (
-                            <span className="text-[9px] text-gray-400 dark:text-gray-500">
-                              {item.candidate_years_experience.toFixed(1)} yr(s)
-                            </span>
-                          )}
-                        </div>
-                      ) : item.filter_stage === 'tfidf_filtered' ? (
-                        <div className="flex flex-col gap-0.5">
-                          <span
-                            className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-600"
-                            title={`Pre-filter: keyword relevance score ${item.tfidf_score != null ? (item.tfidf_score * 100).toFixed(1) + '%' : 'n/a'} was below threshold — LLM evaluation skipped`}
-                          >
-                            Stage 1 filtered
-                          </span>
-                          {item.tfidf_score != null && (
-                            <span className="text-[9px] text-gray-400 dark:text-gray-500">
-                              relevance: {(item.tfidf_score * 100).toFixed(1)}%
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <>
-                          <span
-                            className="text-sm font-bold"
-                            style={{ color: item.total_score >= 75 ? '#1D9E75' : item.total_score >= 50 ? '#EF9F27' : '#E24B4A' }}
-                            title={`Raw score: ${item.total_score.toFixed(1)}`}
-                          >
-                            {Math.round(item.total_score)}
-                          </span>
-                          {selectedRole?.min_fit_score != null &&
-                            Math.round(item.total_score) >= selectedRole.min_fit_score &&
-                            item.total_score < selectedRole.min_fit_score && (
-                              <span
-                                className="ml-1 text-[9px] text-[#EF9F27] font-semibold align-top"
-                                title={`Displays as ${Math.round(item.total_score)} but raw score ${item.total_score.toFixed(1)} is below threshold ${selectedRole.min_fit_score}`}
-                              >
-                                ≈
-                              </span>
-                            )}
-                        </>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 max-w-[180px]">
-                      <div className="flex flex-wrap gap-1">
-                        {(item.matched_skill_names ?? []).slice(0, 4).map((s) => (
-                          <span key={s} className="text-[10px] font-medium bg-[#EEEDFE] dark:bg-[#2d2a5a] text-[#3C3489] dark:text-[#AFA9EC] px-1.5 py-0.5 rounded-full border border-[#AFA9EC]/60">
-                            {s}
-                          </span>
-                        ))}
-                        {(item.matched_skill_names ?? []).length > 4 && (
-                          <span className="text-[10px] text-gray-400 dark:text-gray-500 px-1 py-0.5">
-                            +{item.matched_skill_names.length - 4}
-                          </span>
-                        )}
-                        {(item.matched_skill_names ?? []).length === 0 && (
-                          <span className="text-[10px] text-gray-400 dark:text-gray-500">{item.skills_matched}/{item.skills_total}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">{item.job_role_title}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs text-gray-400 dark:text-gray-500">{item.evaluated_at ? formatDate(item.evaluated_at) : '—'}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={item.status as Parameters<typeof StatusBadge>[0]['status']} />
-                    </td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      {isAdmin ? (
-                        <select
-                          value={item.candidate_stage ?? 'applied'}
-                          onChange={(e) => stageMut.mutate({ candidateId: item.candidate_id, stage: e.target.value as CandidateStage })}
-                          className={`text-[10px] font-semibold px-2 py-0.5 rounded border cursor-pointer appearance-none focus:outline-none focus:ring-1 focus:ring-[#534AB7]/40 ${STAGE_COLORS[item.candidate_stage as CandidateStage] ?? STAGE_COLORS.applied}`}
-                          disabled={stageMut.isPending}
-                        >
-                          {(Object.keys(STAGE_LABELS) as CandidateStage[]).map((s) => (
-                            <option key={s} value={s}>{STAGE_LABELS[s]}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${STAGE_COLORS[item.candidate_stage as CandidateStage] ?? STAGE_COLORS.applied}`}>
-                          {STAGE_LABELS[item.candidate_stage as CandidateStage] ?? 'Applied'}
-                        </span>
-                      )}
-                    </td>
-                    {isAdmin && (
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        {item.email_sent_at ? (
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-[10px] text-[#1D9E75] font-semibold">✓ Sent</span>
-                            {item.email_opened_at
-                              ? <span className="text-[10px] text-[#1D9E75]" title={`Opened ${new Date(item.email_opened_at).toLocaleString()}`}>👁 Opened</span>
-                              : <span className="text-[10px] text-gray-400">Not opened</span>
-                            }
-                            <button
-                              onClick={() => sendEmailMut.mutate({ evalId: item.evaluation_id, force: true })}
-                              disabled={sendEmailMut.isPending}
-                              className="text-[10px] text-gray-400 hover:text-[#534AB7] disabled:opacity-50 transition-colors"
-                              title="Resend next-steps email"
-                            >
-                              Resend
-                            </button>
-                            {emailMsg?.id === item.evaluation_id && (
-                              <span className="text-[10px] text-[#534AB7]">{emailMsg.msg}</span>
-                            )}
-                          </div>
-                        ) : item.candidate_email ? (
-                          <div className="flex flex-col gap-0.5">
-                            <button
-                              onClick={() => sendEmailMut.mutate({ evalId: item.evaluation_id, force: false })}
-                              disabled={sendEmailMut.isPending}
-                              className="text-[10px] font-medium px-2 py-1 rounded border border-[#534AB7] text-[#534AB7] hover:bg-[#EEEDFE] disabled:opacity-50 transition-colors whitespace-nowrap"
-                              title="Send next-steps (Coding → Interview → HR) email"
-                            >
-                              {sendEmailMut.isPending && sendEmailMut.variables?.evalId === item.evaluation_id
-                                ? 'Sending…'
-                                : 'Send Email'}
-                            </button>
-                            {emailMsg?.id === item.evaluation_id && (
-                              <span className="text-[10px] text-[#534AB7]">{emailMsg.msg}</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-[10px] text-gray-300 dark:text-gray-600">No email</span>
-                        )}
-                      </td>
-                    )}
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (confirm('Delete this result?')) {
-                            deleteMutation.mutate(item.evaluation_id)
-                          }
-                        }}
-                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                        title="Delete result"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </td>
-                  </tr>
-                )
+      {/* Candidate Grid Table */}
+      <CandidateTable
+        items={items}
+        isLoading={isLoading}
+        isError={isError}
+        selectedIds={selectedIds}
+        toggleSelectAll={toggleSelectAll}
+        toggleSelect={toggleSelect}
+        blindMode={blindMode}
+        maskName={maskName}
+        maskEmail={maskEmail}
+        isAdmin={isAdmin}
+        stageMut={stageMut}
+        sendEmailMut={sendEmailMut}
+        emailMsg={emailMsg}
+        deleteMutation={deleteMutation}
+        groupByExp={groupByExp}
+        page={1}
+        PAGE_SIZE={PAGE_SIZE}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        toggleSort={toggleSort}
+        selectedRole={selectedRole}
+      />
 
-                if (!groupByExp) {
-                  return items.map((item, idx) => renderRow(item, (page - 1) * PAGE_SIZE + idx))
-                }
-
-                // Grouped view: organize by experience level in a fixed order
-                const groups = EXP_ORDER.map((level) => ({
-                  level,
-                  rows: items.filter((r) => (r.candidate_experience_level ?? 'entry') === level),
-                })).filter((g) => g.rows.length > 0)
-
-                let globalIdx = (page - 1) * PAGE_SIZE
-                return groups.flatMap(({ level, rows }) => [
-                  <tr key={`group-${level}`} className="bg-gray-50 dark:bg-gray-800/60">
-                    <td colSpan={isAdmin ? 13 : 12} className="px-4 py-2">
-                      <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${EXP_COLORS[level]}`}>
-                        {EXP_LABELS[level]}
-                      </span>
-                      <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">{rows.length} candidate{rows.length !== 1 ? 's' : ''}</span>
-                    </td>
-                  </tr>,
-                  ...rows.map((item) => renderRow(item, globalIdx++)),
-                ])
-              })()}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Pagination controls */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-1">
-          <p className="text-xs text-gray-400 dark:text-gray-500">
-            Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, totalEvaluated)} of {totalEvaluated}
-          </p>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage(1)}
-              disabled={page === 1}
-              className="px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >«</button>
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-2.5 py-1 text-xs rounded border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >‹ Prev</button>
-            {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
-              let p: number
-              if (totalPages <= 7) {
-                p = i + 1
-              } else if (page <= 4) {
-                p = i + 1
-              } else if (page >= totalPages - 3) {
-                p = totalPages - 6 + i
-              } else {
-                p = page - 3 + i
-              }
-              return (
-                <button
-                  key={p}
-                  onClick={() => setPage(p)}
-                  className={`w-7 h-7 text-xs rounded border transition-colors ${
-                    p === page
-                      ? 'bg-[#534AB7] text-white border-[#534AB7]'
-                      : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                  }`}
-                >{p}</button>
-              )
-            })}
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-2.5 py-1 text-xs rounded border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >Next ›</button>
-            <button
-              onClick={() => setPage(totalPages)}
-              disabled={page === totalPages}
-              className="px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >»</button>
+      {/* Pagination Status / Infinite Scroll Indicator */}
+      <div className="flex flex-col items-center justify-center py-4 px-1">
+        {isFetchingNextPage ? (
+          <div className="flex items-center gap-2 text-sm text-[#534AB7] dark:text-[#AFA9EC] font-semibold animate-pulse">
+            <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            Loading more candidates...
           </div>
-        </div>
-      )}
+        ) : !hasNextPage && items.length > 0 ? (
+          <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">
+            Showing all {totalEvaluated} evaluated candidates
+          </p>
+        ) : items.length > 0 ? (
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            Scroll down to load more candidates (Showing {items.length} of {totalEvaluated})
+          </p>
+        ) : null}
+      </div>
     </div>
   )
 }

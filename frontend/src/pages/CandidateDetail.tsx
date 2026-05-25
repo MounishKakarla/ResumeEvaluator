@@ -519,7 +519,8 @@ export default function CandidateDetail() {
             </div>
 
             {/* Right sidebar */}
-            <aside className="w-64 shrink-0 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 p-5 flex flex-col gap-5 overflow-y-auto">
+            <aside className="w-64 shrink-0 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 p-5 flex flex-col gap-5">
+
 
               {/* Score circle */}
               <div className="flex flex-col items-center gap-2">
@@ -633,7 +634,10 @@ export default function CandidateDetail() {
                     return (
                       <div key={idx} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
                         {/* Section header */}
-                        <div className="flex items-center gap-3 px-4 py-3">
+                        <div
+                          onClick={() => toggleSection(idx)}
+                          className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/40 select-none transition-colors"
+                        >
                           <span
                             className="text-xs font-semibold px-2 py-0.5 rounded-full text-white shrink-0"
                             style={{ backgroundColor: color }}
@@ -657,12 +661,11 @@ export default function CandidateDetail() {
                             <span className="text-[10px] text-gray-400 dark:text-gray-500 w-7 text-right">{confPct}%</span>
                           </div>
                           {/* Expand toggle */}
-                          <button
-                            onClick={() => toggleSection(idx)}
-                            className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors shrink-0 ml-1"
+                          <span
+                            className="text-xs text-gray-400 dark:text-gray-500 transition-colors shrink-0 ml-1"
                           >
                             {isExpanded ? '▲' : '▼'}
-                          </button>
+                          </span>
                         </div>
                         {/* Section text — collapsible */}
                         {isExpanded && sec.text && (

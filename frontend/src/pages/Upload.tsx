@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
 import type { QueuedFile, DetectedSection } from '../store/useAppStore'
-import { uploadResume, getResumes, deleteResume, archiveResume, runEvaluation, getJobRoles, getEvaluationStatus, reparseAllCandidates } from '../api/client'
+import { uploadResume, getResumes, deleteResume, deleteAllResumes, archiveResume, runEvaluation, getJobRoles, getEvaluationStatus, reparseAllCandidates } from '../api/client'
 import type { UploadResponse, JobRole, ParseSettings, EvaluationStatus } from '../api/client'
 import UploadZone from '../components/UploadZone'
 import StatusBadge from '../components/StatusBadge'
@@ -108,6 +108,18 @@ export default function Upload() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['resumes'] })
       queryClient.invalidateQueries({ queryKey: ['results'] })
+    },
+  })
+
+  const deleteAllResumesMutation = useMutation({
+    mutationFn: deleteAllResumes,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resumes'] })
+      queryClient.invalidateQueries({ queryKey: ['results'] })
+      queryClient.invalidateQueries({ queryKey: ['candidate-search'] })
+    },
+    onError: () => {
+      alert('Failed to delete all resumes.')
     },
   })
 
@@ -491,6 +503,20 @@ export default function Upload() {
               >
                 {reparseAllMut.isPending ? 'Parsing…' : '↺ Re-parse Names'}
               </button>
+              {storedResumes && storedResumes.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (confirm('Are you sure you want to permanently delete ALL resumes and all evaluation data? This cannot be undone.')) {
+                      deleteAllResumesMutation.mutate()
+                    }
+                  }}
+                  disabled={deleteAllResumesMutation.isPending}
+                  className="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                  title="Permanently delete all resumes and their evaluation data"
+                >
+                  {deleteAllResumesMutation.isPending ? 'Deleting all...' : '🗑 Delete All'}
+                </button>
+              )}
               {reparseMsg && <span className="text-xs text-green-600">{reparseMsg}</span>}
             </div>
           </div>

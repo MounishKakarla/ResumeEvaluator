@@ -177,6 +177,7 @@ export interface ResultsParams {
   sort?: string
   order?: 'asc' | 'desc'
   status?: string
+  search?: string
 }
 
 export type ShortlistStatus = 'shortlisted' | 'review' | 'rejected'
@@ -562,6 +563,11 @@ export async function getResumes(): Promise<UploadResponse[]> {
 
 export async function deleteResume(resumeId: number): Promise<void> {
   await apiClient.delete(`/upload/${resumeId}`)
+}
+
+export async function deleteAllResumes(): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>('/upload')
+  return data
 }
 
 export async function archiveResume(resumeId: number): Promise<{ message: string }> {

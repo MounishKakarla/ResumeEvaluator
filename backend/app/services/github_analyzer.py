@@ -20,6 +20,18 @@ from urllib.parse import urlparse
 import httpx
 
 
+def _github_headers() -> dict:
+    """Return GitHub API request headers, including auth token if configured."""
+    from app.config import settings
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if settings.github_token:
+        headers["Authorization"] = f"Bearer {settings.github_token}"
+    return headers
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -274,7 +286,7 @@ def analyze_github_profile(
         return {"username": None, "error": f"Could not extract username from: {github_url}"}
 
     base = "https://api.github.com"
-    headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    headers = _github_headers()
 
     try:
         with httpx.Client(timeout=timeout, headers=headers) as client:
@@ -310,7 +322,7 @@ def analyze_github_profile(
     existing_lower = {s["name"].lower() for s in inferred_skills}
     top_repos = repos[:4]
     try:
-        with httpx.Client(timeout=10, headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}) as manifest_client:
+        with httpx.Client(timeout=10, headers=_github_headers()) as manifest_client:
             for repo in top_repos:
                 repo_name = repo.get("name", "")
                 if not repo_name:
@@ -419,7 +431,7 @@ def analyze_github_projects(
     if not username:
         return {"error": f"Invalid GitHub URL: {github_url}", "projects": []}
 
-    headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    headers = _github_headers()
 
     try:
         with httpx.Client(timeout=timeout, headers=headers) as client:

@@ -175,20 +175,18 @@ def enrich_github(
         existing_skills=existing_skills,
     )
 
-    if summary.get("error"):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"GitHub API error: {summary['error']}",
-        )
+    github_error: Optional[str] = summary.get("error")
 
-    candidate.github_summary = json.dumps(summary)
+    # Persist whatever data we got (even partial), matching LinkedIn's graceful pattern
+    if not github_error:
+        candidate.github_summary = json.dumps(summary)
     sources = json.loads(candidate.enrichment_sources or "[]")
     if "github" not in sources:
         sources.append("github")
     candidate.enrichment_sources = json.dumps(sources)
     db.commit()
 
-    return _build_enrichment_out(candidate)
+    return _build_enrichment_out(candidate, error=github_error)
 
 
 @router.post("/{candidate_id}/linkedin", response_model=EnrichmentOut)

@@ -621,11 +621,47 @@ def delete_resume(
             .filter(ResumeVersion.candidate_id == candidate.id)
             .count()
         )
-        if remaining == 0:
-            from datetime import datetime, timezone
-            candidate.deleted_at = datetime.now(timezone.utc)
-
     db.commit()
+
+
+@router.delete("", status_code=status.HTTP_200_OK)
+def delete_all_resumes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Delete ALL resume versions, their physical files, parsed data, and evaluations."""
+    # Find all ResumeVersion records
+    resume_versions = db.query(ResumeVersion).all()
+    count = len(resume_versions)
+    
+    # 1. Delete all physical files
+    for rv in resume_versions:
+        if rv.file_path and os.path.exists(rv.file_path):
+            try:
+                os.remove(rv.file_path)
+            except OSError as exc:
+                logger.warning("Could not delete file %s: %s", rv.file_path, exc)
+                
+    # 2. Delete all Evaluation records
+    from app.models import Evaluation, Resume
+    db.query(Evaluation).delete()
+    
+    # 3. Delete all Resume records (parsed content)
+    db.query(Resume).delete()
+    
+    # 4. Delete all ResumeVersion records
+    db.query(ResumeVersion).delete()
+    
+    # 5. Set current_version_id to None on all candidates
+    db.query(Candidate).update({"current_version_id": None})
+    
+    # 6. Soft-delete all candidates (as they have no remaining resume versions)
+    from datetime import datetime, timezone
+    db.query(Candidate).update({"deleted_at": datetime.now(timezone.utc)})
+    
+    db.commit()
+    return {"message": f"Successfully deleted all {count} resumes and their associated evaluations."}
+
 
 
 # ---------------------------------------------------------------------------

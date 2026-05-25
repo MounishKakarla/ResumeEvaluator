@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # keyword will be processed.  Leave empty ("") to accept all emails (no filter).
     imap_subject_keywords: str = "resume,cv,application,applying,job application,position,candidate"
 
+    # GitHub API token — optional but recommended; raises rate limit from 60 to 5000 req/hr
+    github_token: str = ""
+
     # LLM integration
     llm_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"

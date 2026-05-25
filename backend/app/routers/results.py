@@ -68,6 +68,7 @@ def list_results(
     sort: str = Query(default="total_score", alias="sort_by"),
     order: str = Query(default="desc", pattern="^(asc|desc)$", alias="sort_dir"),
     shortlist_status: Optional[str] = Query(default=None, alias="status"),
+    search: Optional[str] = Query(default=None),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -86,6 +87,7 @@ def list_results(
 
     query = (
         db.query(Evaluation)
+        .join(ResumeVersion, Evaluation.resume_id == ResumeVersion.id)
         .options(
             joinedload(Evaluation.resume)
             .joinedload(Resume.version)
@@ -93,8 +95,9 @@ def list_results(
             joinedload(Evaluation.shortlists),
             joinedload(Evaluation.job_role),
         )
-        # Exclude soft-deleted candidates and intake-paused evaluations
+        # Exclude soft-deleted candidates, intake-paused evaluations, and non-current resume versions
         .filter(
+            ResumeVersion.is_current.is_(True),
             Evaluation.resume_id.notin_(soft_deleted_resume_ids),
             or_(
                 Evaluation.eval_status.is_(None),
@@ -106,6 +109,24 @@ def list_results(
 
     if job_role_id is not None:
         query = query.filter(Evaluation.job_role_id == job_role_id)
+
+    # ── Name / email search ───────────────────────────────────────────────────
+    if search and search.strip():
+        term = f"%{search.strip().lower()}%"
+        matching_resume_ids = (
+            db.query(Resume.id)
+            .join(ResumeVersion, Resume.id == ResumeVersion.id)
+            .join(Candidate, ResumeVersion.candidate_id == Candidate.id)
+            .filter(
+                or_(
+                    func.lower(Candidate.name).like(term),
+                    func.lower(Candidate.email).like(term),
+                )
+            )
+            .subquery()
+        )
+        query = query.filter(Evaluation.resume_id.in_(matching_resume_ids))
+
 
     # ── Shortlist status filter (DB subquery, not Python loop) ────────────────
     if shortlist_status == "pending":
@@ -761,10 +782,14 @@ def export_results_csv(
     """
     q = (
         db.query(Evaluation)
+        .join(ResumeVersion, Evaluation.resume_id == ResumeVersion.id)
         .options(
             joinedload(Evaluation.resume).joinedload(Resume.version).joinedload(ResumeVersion.candidate),
         )
-        .filter(Evaluation.eval_status.is_(None))
+        .filter(
+            ResumeVersion.is_current.is_(True),
+            Evaluation.eval_status.is_(None)
+        )
     )
     if job_role_id is not None:
         q = q.filter(Evaluation.job_role_id == job_role_id)
@@ -857,7 +882,9 @@ def results_summary(
 
     base = (
         db.query(Evaluation)
+        .join(ResumeVersion, Evaluation.resume_id == ResumeVersion.id)
         .filter(
+            ResumeVersion.is_current.is_(True),
             Evaluation.resume_id.notin_(soft_deleted_resume_ids),
             or_(
                 Evaluation.eval_status.is_(None),

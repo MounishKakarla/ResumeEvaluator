@@ -108,15 +108,38 @@ export default function AuditLogs() {
                         {entry.target_type} #{entry.target_id}
                       </td>
                       <td className="px-4 py-2.5 text-xs text-gray-500 dark:text-gray-400 max-w-xs">
-                        {entry.details
-                          ? Object.entries(entry.details).map(([field, val]) => {
+                        {(() => {
+                          if (!entry.details) return <span className="italic text-gray-400">—</span>
+
+                          let parsedDetails = entry.details
+                          if (typeof parsedDetails === 'string') {
+                            try {
+                              parsedDetails = JSON.parse(parsedDetails)
+                            } catch {
+                              return <span className="text-gray-600 dark:text-gray-300">{String(parsedDetails)}</span>
+                            }
+                          }
+
+                          if (typeof parsedDetails !== 'object' || parsedDetails === null) {
+                            return <span className="text-gray-600 dark:text-gray-300">{String(parsedDetails)}</span>
+                          }
+
+                          if (Array.isArray(parsedDetails)) {
+                            return <span className="text-gray-600 dark:text-gray-300">{JSON.stringify(parsedDetails)}</span>
+                          }
+
+                          try {
+                            const entries = Object.entries(parsedDetails)
+                            if (entries.length === 0) return <span className="italic text-gray-400">—</span>
+
+                            return entries.map(([field, val]) => {
                               const isPair = Array.isArray(val) && val.length === 2
                               const oldVal = isPair ? val[0] : undefined
                               const newVal = isPair ? val[1] : val
 
                               return (
-                                <span key={field} className="mr-2 whitespace-nowrap">
-                                  <span className="font-medium text-gray-700 dark:text-gray-300">{field}</span>
+                                <span key={field} className="mr-3 inline-block">
+                                  <span className="font-semibold text-gray-700 dark:text-gray-300 capitalize">{field.replace(/_/g, ' ')}</span>
                                   {': '}
                                   {isPair ? (
                                     <>
@@ -124,12 +147,14 @@ export default function AuditLogs() {
                                       {' → '}
                                     </>
                                   ) : null}
-                                  <span className="text-gray-700 dark:text-gray-200">{String(newVal ?? '—')}</span>
+                                  <span className="text-gray-800 dark:text-gray-200 font-medium">{String(newVal ?? '—')}</span>
                                 </span>
                               )
                             })
-                          : <span className="italic text-gray-400">—</span>
-                        }
+                          } catch {
+                            return <span className="text-gray-600 dark:text-gray-300">{JSON.stringify(parsedDetails)}</span>
+                          }
+                        })()}
                       </td>
                     </tr>
                   ))}

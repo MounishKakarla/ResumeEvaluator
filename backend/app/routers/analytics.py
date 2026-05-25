@@ -130,7 +130,14 @@ def get_analytics(
     """Return aggregated analytics for all (or a specific) job role."""
 
     # ── Load scored evaluations ───────────────────────────────────────────
-    q = db.query(Evaluation).filter(Evaluation.eval_status.is_(None))
+    q = (
+        db.query(Evaluation)
+        .join(ResumeVersion, Evaluation.resume_id == ResumeVersion.id)
+        .filter(
+            ResumeVersion.is_current.is_(True),
+            Evaluation.eval_status.is_(None)
+        )
+    )
     if job_role_id is not None:
         q = q.filter(Evaluation.job_role_id == job_role_id)
     evals = q.all()
@@ -338,7 +345,10 @@ def get_calibration(
         .join(ResumeVersion, ResumeVersion.id == Resume.id)
         .join(Candidate, Candidate.id == ResumeVersion.candidate_id)
         .join(Outcome, Outcome.candidate_id == Candidate.id)
-        .filter(Evaluation.eval_status.is_(None))
+        .filter(
+            ResumeVersion.is_current.is_(True),
+            Evaluation.eval_status.is_(None)
+        )
     )
     if job_role_id is not None:
         q = q.filter(Evaluation.job_role_id == job_role_id)
