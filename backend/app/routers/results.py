@@ -18,6 +18,7 @@ from app.routers.audit import record_audit
 from app.models import (
     Candidate,
     Evaluation,
+    InboundEmail,
     JobRole,
     JobRoleSkill,
     Resume,
@@ -561,6 +562,23 @@ def delete_all_results(
             db.query(Evaluation.id).filter(Evaluation.job_role_id == job_role_id).all()
         ]
         if eval_ids:
+            # Find candidate emails linked to these evaluations
+            emails = [
+                row[0] for row in
+                db.query(Candidate.email)
+                .join(ResumeVersion, ResumeVersion.candidate_id == Candidate.id)
+                .join(Resume, Resume.id == ResumeVersion.id)
+                .join(Evaluation, Evaluation.resume_id == Resume.id)
+                .filter(Evaluation.id.in_(eval_ids))
+                .all()
+                if row[0]
+            ]
+            if emails:
+                # Delete corresponding InboundEmail logs
+                db.query(InboundEmail).filter(
+                    InboundEmail.sender_email.in_(emails)
+                ).delete(synchronize_session=False)
+
             db.query(Shortlist).filter(
                 Shortlist.evaluation_id.in_(eval_ids)
             ).delete(synchronize_session=False)
@@ -588,6 +606,21 @@ def delete_result(
     if ev is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result not found")
     try:
+        # Find candidate email associated with this evaluation
+        candidate_email = (
+            db.query(Candidate.email)
+            .join(ResumeVersion, ResumeVersion.candidate_id == Candidate.id)
+            .join(Resume, Resume.id == ResumeVersion.id)
+            .join(Evaluation, Evaluation.resume_id == Resume.id)
+            .filter(Evaluation.id == evaluation_id)
+            .scalar()
+        )
+        if candidate_email:
+            # Delete corresponding InboundEmail log
+            db.query(InboundEmail).filter(
+                InboundEmail.sender_email == candidate_email
+            ).delete(synchronize_session=False)
+
         # Delete related shortlists first to avoid FK constraint violations
         db.query(Shortlist).filter(
             Shortlist.evaluation_id == evaluation_id
@@ -615,6 +648,23 @@ def bulk_delete_results(
     if not body.ids:
         return {"deleted": 0}
     try:
+        # Find candidate emails linked to these evaluations
+        emails = [
+            row[0] for row in
+            db.query(Candidate.email)
+            .join(ResumeVersion, ResumeVersion.candidate_id == Candidate.id)
+            .join(Resume, Resume.id == ResumeVersion.id)
+            .join(Evaluation, Evaluation.resume_id == Resume.id)
+            .filter(Evaluation.id.in_(body.ids))
+            .all()
+            if row[0]
+        ]
+        if emails:
+            # Delete corresponding InboundEmail logs
+            db.query(InboundEmail).filter(
+                InboundEmail.sender_email.in_(emails)
+            ).delete(synchronize_session=False)
+
         db.query(Shortlist).filter(
             Shortlist.evaluation_id.in_(body.ids)
         ).delete(synchronize_session=False)
@@ -873,19 +923,13 @@ def results_summary(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Return aggregate stats for the stat cards — computed over ALL pages, not just the visible one."""
-    soft_deleted_resume_ids = (
-        db.query(Resume.id)
-        .join(ResumeVersion, Resume.id == ResumeVersion.id)
-        .join(Candidate, ResumeVersion.candidate_id == Candidate.id)
-        .filter(Candidate.deleted_at.isnot(None))
-    )
-
     base = (
         db.query(Evaluation)
         .join(ResumeVersion, Evaluation.resume_id == ResumeVersion.id)
+        .join(Candidate, ResumeVersion.candidate_id == Candidate.id)
         .filter(
             ResumeVersion.is_current.is_(True),
-            Evaluation.resume_id.notin_(soft_deleted_resume_ids),
+            Candidate.deleted_at.is_(None),
             or_(
                 Evaluation.eval_status.is_(None),
                 Evaluation.eval_status == "tfidf_filtered",
@@ -912,22 +956,19 @@ def results_summary(
     )
     shortlisted: int = base.filter(latest_sl_subq == "shortlisted").count()
 
-    # needs_manual_review lives on Candidate, not Evaluation — join through the resume chain
-    needs_review: int = (
-        base
-        .join(Resume, Evaluation.resume_id == Resume.id)
-        .join(ResumeVersion, Resume.id == ResumeVersion.id)
-        .join(Candidate, ResumeVersion.candidate_id == Candidate.id)
-        .filter(Candidate.needs_manual_review.is_(True))
-        .count()
-    )
+    # since Candidate is already joined in base, we simply filter on the candidate field directly
+    needs_review: int = base.filter(Candidate.needs_manual_review.is_(True)).count()
     tfidf_filtered: int = base.filter(Evaluation.eval_status == "tfidf_filtered").count()
     experience_filtered: int = base.filter(Evaluation.eval_status == "experience_filtered").count()
 
     queued_q = (
         db.query(Evaluation)
-        .filter(Evaluation.eval_status == "queued")
-        .filter(Evaluation.resume_id.notin_(soft_deleted_resume_ids))
+        .join(ResumeVersion, Evaluation.resume_id == ResumeVersion.id)
+        .join(Candidate, ResumeVersion.candidate_id == Candidate.id)
+        .filter(
+            Evaluation.eval_status == "queued",
+            Candidate.deleted_at.is_(None),
+        )
     )
     if job_role_id is not None:
         queued_q = queued_q.filter(Evaluation.job_role_id == job_role_id)
