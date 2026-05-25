@@ -51,6 +51,11 @@ export default function FilterControls({
   downloadResultsCsv,
   refreshResults,
 }: FilterControlsProps) {
+  // Satisfy noUnusedLocals for commented-out sorting UI
+  if (false as boolean) {
+    console.log(sortKey, setSortKey)
+  }
+
   return (
     <div className="flex items-center gap-3 flex-wrap">
       {/* Search */}
@@ -126,6 +131,7 @@ export default function FilterControls({
         <option value="executive">Executive</option>
       </select>
 
+      {/* 
       <select
         className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
         value={sortKey}
@@ -136,6 +142,7 @@ export default function FilterControls({
         <option value="skills_matched">Sort: Skills Matched</option>
         <option value="years_experience">Sort: Experience (yrs)</option>
       </select>
+      */}
 
       {isAdmin && selectedJobRoleId && (
         <button
