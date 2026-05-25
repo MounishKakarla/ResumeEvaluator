@@ -120,6 +120,11 @@ export default function EmailIngestion() {
       } catch (err) {
         console.error(err)
       }
+      try {
+        await setIngestionMethod('auto')
+        setSelectedMethod('auto')
+        queryClient.invalidateQueries({ queryKey: ['ingestionMethod'] })
+      } catch { /* non-fatal */ }
       setTimeout(() => {
         setImapFetchMsg(null)
         queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
@@ -262,6 +267,11 @@ export default function EmailIngestion() {
       } catch (err) {
         console.error(err)
       }
+      try {
+        await setIngestionMethod('auto')
+        setSelectedMethod('auto')
+        queryClient.invalidateQueries({ queryKey: ['ingestionMethod'] })
+      } catch { /* non-fatal */ }
       setTimeout(() => {
         setGraphFetchMsg(null)
         queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
@@ -697,7 +707,7 @@ export default function EmailIngestion() {
       {isAdmin && (
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
           <div className="mb-3">
-            <h2 className="font-semibold text-gray-800 dark:text-gray-100">Ingestion Method</h2>
+            <h2 className="font-semibold text-gray-800 dark:text-gray-100">Inbound Config</h2>
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
               Choose which method the system uses to poll for incoming resume emails.
             </p>
@@ -706,7 +716,7 @@ export default function EmailIngestion() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {([
               { value: 'disabled', label: 'Disabled', desc: 'No polling', icon: '⏹', color: 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400' },
-              { value: 'auto',     label: 'Auto',     desc: 'Graph if set, else IMAP', icon: '⚡', color: 'border-[#534AB7] text-[#534AB7] dark:text-[#AFA9EC]' },
+              { value: 'auto',     label: 'Auto', desc: 'Graph if set, else IMAP', icon: '⚡', color: 'border-[#534AB7] text-[#534AB7] dark:text-[#AFA9EC]' },
               { value: 'imap',    label: 'IMAP',      desc: 'Force IMAP only', icon: '📧', color: 'border-[#1D9E75] text-[#1D9E75]' },
               { value: 'graph',   label: 'Microsoft Graph', desc: 'Force Graph API only', icon: '☁', color: 'border-[#0078D4] text-[#0078D4]' },
             ] as { value: IngestionMethod; label: string; desc: string; icon: string; color: string }[]).map(({ value, label, desc, icon, color }) => {
