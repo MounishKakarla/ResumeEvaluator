@@ -733,6 +733,7 @@ export async function setIngestionMethod(method: IngestionMethod): Promise<{ met
 
 export async function getInboundEmails(params?: {
   status?: string
+  search?: string
   page?: number
   limit?: number
 }): Promise<PaginatedInboundEmails> {
@@ -1066,6 +1067,7 @@ export async function triggerGraphFetch(fromDate?: string, toDate?: string): Pro
   const { data } = await apiClient.post<{ message: string }>('/admin/trigger-graph-fetch', {
     from_date: fromDate ?? '',
     to_date: toDate ?? '',
+    tz_offset_minutes: new Date().getTimezoneOffset(),
   })
   return data
 }

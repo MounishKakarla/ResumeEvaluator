@@ -186,12 +186,28 @@ def _resolve_folder_id(token: str, mailbox: str, folder_name: str) -> str:
     )
 
 
+def _local_date_to_utc(date_str: str, end_of_day: bool, tz_offset_minutes: int) -> str:
+    """Convert a YYYY-MM-DD local date to a UTC ISO datetime string.
+
+    tz_offset_minutes is the JS getTimezoneOffset() value: UTC − local in minutes.
+    e.g. IST (UTC+5:30) → tz_offset_minutes = -330
+    """
+    from datetime import datetime, timedelta
+    if end_of_day:
+        local_dt = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+    else:
+        local_dt = datetime.strptime(date_str, "%Y-%m-%d")
+    utc_dt = local_dt + timedelta(minutes=tz_offset_minutes)
+    return utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _get_messages_with_attachments(
     token: str,
     mailbox: str,
     folder: str,
     from_date: str = "",
     to_date: str = "",
+    tz_offset_minutes: int = 0,
 ) -> list[dict]:
     """Fetch messages that have attachments, with optional date-range filter.
 
@@ -210,9 +226,11 @@ def _get_messages_with_attachments(
 
     date_filter_parts = []
     if from_date:
-        date_filter_parts.append(f"receivedDateTime ge {from_date}T00:00:00Z")
+        utc_from = _local_date_to_utc(from_date, end_of_day=False, tz_offset_minutes=tz_offset_minutes)
+        date_filter_parts.append(f"receivedDateTime ge {utc_from}")
     if to_date:
-        date_filter_parts.append(f"receivedDateTime le {to_date}T23:59:59Z")
+        utc_to = _local_date_to_utc(to_date, end_of_day=True, tz_offset_minutes=tz_offset_minutes)
+        date_filter_parts.append(f"receivedDateTime le {utc_to}")
 
     if date_filter_parts:
         # Date-range path: OData can't combine receivedDateTime $orderby with

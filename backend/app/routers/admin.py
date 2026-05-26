@@ -454,6 +454,7 @@ def save_graph_settings(
 class TriggerFetchRequest(BaseModel):
     from_date: str = ""
     to_date: str = ""
+    tz_offset_minutes: int = 0  # JS getTimezoneOffset() value (UTC - local, e.g. -330 for IST)
 
 
 @router.post("/trigger-graph-fetch")
@@ -481,6 +482,7 @@ def trigger_graph_fetch(
     # Capture body values before thread starts (avoid closure over mutable state)
     body_from = req.from_date if req else ""
     body_to = req.to_date if req else ""
+    body_tz_offset = req.tz_offset_minutes if req else 0
 
     def _run() -> None:
         _stop_event.clear()
@@ -496,6 +498,7 @@ def trigger_graph_fetch(
                 token, cfg["mailbox"], cfg["folder"],
                 from_date=from_date,
                 to_date=to_date,
+                tz_offset_minutes=body_tz_offset,
             )
             for msg in messages:
                 if _stop_event.is_set():

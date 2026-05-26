@@ -24,6 +24,7 @@ type FilterStatus = '' | 'processed' | 'failed' | 'no_attachment' | 'new' | 'key
 
 export default function EmailIngestion() {
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('')
+  const [emailSearch, setEmailSearch] = useState('')
   const [page, setPage] = useState(1)
   const role = useAppStore((s) => s.role)
   const isAdmin = role === 'admin'
@@ -371,8 +372,8 @@ export default function EmailIngestion() {
   })
 
   const { data: log, isLoading: logLoading } = useQuery({
-    queryKey: ['inboundEmails', statusFilter, page],
-    queryFn: () => getInboundEmails({ status: statusFilter || undefined, page, limit: 30 }),
+    queryKey: ['inboundEmails', statusFilter, emailSearch, page],
+    queryFn: () => getInboundEmails({ status: statusFilter || undefined, search: emailSearch || undefined, page, limit: 30 }),
     refetchInterval: 30_000,
   })
 
@@ -535,12 +536,12 @@ export default function EmailIngestion() {
             )}
           </div>
 
-          <div className="mt-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg px-4 py-3 text-xs text-gray-500 dark:text-gray-400 space-y-1">
+          {/* <div className="mt-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg px-4 py-3 text-xs text-gray-500 dark:text-gray-400 space-y-1">
             <p className="font-medium text-gray-600 dark:text-gray-300">Common settings:</p>
             <p>Office 365 / Outlook: host <code className="font-mono bg-gray-100 dark:bg-gray-700 px-1 rounded">outlook.office365.com</code> · port <code className="font-mono bg-gray-100 dark:bg-gray-700 px-1 rounded">993</code> · SSL on</p>
             <p>Gmail (App Password): host <code className="font-mono bg-gray-100 dark:bg-gray-700 px-1 rounded">imap.gmail.com</code> · port <code className="font-mono bg-gray-100 dark:bg-gray-700 px-1 rounded">993</code> · SSL on</p>
             <p>For Gmail, enable 2FA and use an <strong>App Password</strong> (not your regular password). For Office 365, enable IMAP in Outlook settings.</p>
-          </div>
+          </div> */}
         </div>
       )}
 
@@ -693,13 +694,13 @@ export default function EmailIngestion() {
             )}
           </div>
 
-          <div className="mt-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg px-4 py-3 text-xs text-gray-500 dark:text-gray-400 space-y-1">
+          {/* <div className="mt-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg px-4 py-3 text-xs text-gray-500 dark:text-gray-400 space-y-1">
             <p className="font-medium text-gray-600 dark:text-gray-300">Azure App Registration (one-time setup):</p>
             <p>1. <strong>portal.azure.com → App registrations → New registration</strong></p>
             <p>2. API permissions → Microsoft Graph → Application → <strong>Mail.Read</strong> → Grant admin consent</p>
             <p>3. Certificates &amp; Secrets → New client secret → copy the <strong>Value</strong></p>
             <p>4. Copy <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong> from app overview</p>
-          </div>
+          </div> */}
         </div>
       )}
 
@@ -866,7 +867,22 @@ export default function EmailIngestion() {
             Email Log
             {log && <span className="ml-2 text-xs text-gray-400 font-normal">({log.total} total)</span>}
           </h3>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative">
+              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                value={emailSearch}
+                onChange={(e) => { setEmailSearch(e.target.value); setPage(1) }}
+                placeholder="Search sender or subject…"
+                className="pl-8 pr-7 py-1.5 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 w-52 placeholder-gray-400 dark:placeholder-gray-500"
+              />
+              {emailSearch && (
+                <button onClick={() => { setEmailSearch(''); setPage(1) }} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-base leading-none">×</button>
+              )}
+            </div>
             <select
               className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
               value={statusFilter}

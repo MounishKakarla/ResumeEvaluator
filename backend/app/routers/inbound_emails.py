@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -125,6 +125,7 @@ def get_imap_config(
 @router.get("", response_model=PaginatedInboundEmails)
 def list_inbound_emails(
     status: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=30, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -134,6 +135,14 @@ def list_inbound_emails(
     query = db.query(InboundEmail)
     if status:
         query = query.filter(InboundEmail.status == status)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                InboundEmail.sender_email.ilike(pattern),
+                InboundEmail.subject.ilike(pattern),
+            )
+        )
     query = query.order_by(InboundEmail.received_at.desc())
 
     total = query.count()
