@@ -523,6 +523,7 @@ export interface EvaluationStatus {
   filtered: number
   error: number
   in_progress: boolean
+  paused: boolean
 }
 
 export async function getEvaluationStatus(jobRoleId: number): Promise<EvaluationStatus> {

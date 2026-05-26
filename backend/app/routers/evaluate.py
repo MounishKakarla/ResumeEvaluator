@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_current_user, get_db
 from app.routers.audit import record_audit
-from app.models import Candidate, Evaluation, JobRole, JobRoleSkill, Resume, ResumeVersion, Shortlist, Skill, User
+from app.models import Candidate, Evaluation, JobRole, JobRoleSkill, Resume, ResumeVersion, Shortlist, Skill, SystemSetting, User
 from app.models import _utcnow
 from app.schemas import BulkRerunRequest, EvaluationRequest, EvaluationResponse, ScoringWeights, SendNextStepsRequest
 from app.services.reasoning import generate_interview_questions, generate_reasoning_summary
@@ -22,9 +22,30 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
 # ---------------------------------------------------------------------------
-# Per-job-role pause flags — set → background workers skip the job
+# Per-job-role pause state — stored in DB so all uvicorn workers share it
 # ---------------------------------------------------------------------------
-_PAUSED_JOBS: set[int] = set()   # job_role_ids currently paused
+
+def _pause_key(job_role_id: int) -> str:
+    return f"eval_paused_{job_role_id}"
+
+
+def _is_paused(job_role_id: int, db: Session) -> bool:
+    row = db.query(SystemSetting).filter(SystemSetting.key == _pause_key(job_role_id)).first()
+    return row is not None and row.value == "1"
+
+
+def _set_paused(job_role_id: int, paused: bool, db: Session) -> None:
+    key = _pause_key(job_role_id)
+    row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    if paused:
+        if row is None:
+            db.add(SystemSetting(key=key, value="1"))
+        else:
+            row.value = "1"
+    else:
+        if row is not None:
+            db.delete(row)
+    db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -872,8 +893,8 @@ def _background_evaluate(
     db = SessionLocal()
     try:
         for resume_id in resume_ids:
-            # Honour pause flag — stop processing but keep remaining as queued
-            if job_role_id in _PAUSED_JOBS:
+            # Honour pause flag — check DB so all uvicorn workers share state
+            if _is_paused(job_role_id, db):
                 logger.info(
                     "Evaluation paused for job_role_id=%d; %d resumes remain queued.",
                     job_role_id, len(resume_ids),
@@ -986,7 +1007,7 @@ def evaluate(
         _queue_evaluation(rid, body.job_role_id, db)
 
     # Clear any existing pause flag for this job role when a new run is started.
-    _PAUSED_JOBS.discard(body.job_role_id)
+    _set_paused(body.job_role_id, False, db)
 
     job_id = str(uuid.uuid4())
     background_tasks.add_task(
@@ -1034,6 +1055,7 @@ def bulk_rerun(
 @router.post("/pause", status_code=status.HTTP_200_OK)
 def pause_evaluation(
     job_role_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Pause an in-progress bulk evaluation for a job role.
@@ -1041,7 +1063,7 @@ def pause_evaluation(
     The running background task will stop after the current resume finishes.
     Remaining resumes stay in eval_status='queued' and can be resumed later.
     """
-    _PAUSED_JOBS.add(job_role_id)
+    _set_paused(job_role_id, True, db)
     return {"job_role_id": job_role_id, "paused": True}
 
 
@@ -1057,7 +1079,7 @@ def resume_evaluation(
     Picks up from exactly where it left off — only processes resumes
     still in eval_status='queued' for this job role.
     """
-    _PAUSED_JOBS.discard(job_role_id)
+    _set_paused(job_role_id, False, db)
 
     queued_resume_ids: List[int] = [
         row.resume_id
@@ -1272,4 +1294,5 @@ def evaluation_status(
         "filtered": filtered,
         "error": error_count,
         "in_progress": (queued + processing) > 0,
+        "paused": _is_paused(job_role_id, db),
     }

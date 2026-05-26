@@ -263,16 +263,18 @@ export default function EmailIngestion() {
       const res = await triggerGraphFetch(graphFromDate || undefined, graphToDate || undefined)
       setGraphFetchMsg(res.message)
       setGraphActive(true)
+      setSelectedMethod('auto')
       try {
         localStorage.setItem('graphFetchActive', 'true')
       } catch (err) {
         console.error(err)
       }
+      // Refresh ingestion method immediately so the UI shows "Auto"
+      queryClient.invalidateQueries({ queryKey: ['ingestionMethod'] })
       setTimeout(() => {
         setGraphFetchMsg(null)
         queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
         queryClient.invalidateQueries({ queryKey: ['imapConfig'] })
-        queryClient.invalidateQueries({ queryKey: ['ingestionMethod'] })
       }, 5000)
     } catch {
       setGraphFetchMsg('Fetch trigger failed. Check server logs.')

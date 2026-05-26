@@ -227,23 +227,23 @@ export default function FilterControls({
       {/* Pause / Resume */}
       {selectedJobRoleId != null && (
         <button
-          onClick={() => evalStatus?.in_progress ? pauseMut.mutate() : resumeMut.mutate()}
-          disabled={pauseMut.isPending || resumeMut.isPending}
+          onClick={() => evalStatus?.paused ? resumeMut.mutate() : pauseMut.mutate()}
+          disabled={pauseMut.isPending || resumeMut.isPending || !evalStatus?.in_progress && !evalStatus?.paused}
           title={
-            evalStatus?.in_progress
-              ? 'Pause evaluation — queued resumes stay held'
-              : `Resume evaluation${queuedCount > 0 ? ` — ${queuedCount} queued` : ''}`
+            evalStatus?.paused
+              ? `Resume evaluation${queuedCount > 0 ? ` — ${queuedCount} queued` : ''}`
+              : 'Pause evaluation — queued resumes stay held'
           }
           className={`rounded-lg px-3 py-2 text-sm flex items-center gap-2 transition-colors disabled:opacity-50 ${
-            evalStatus?.in_progress
-              ? 'border border-amber-400 text-amber-600 dark:text-amber-400 dark:border-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'
-              : 'border border-[#1D9E75] text-[#1D9E75] dark:border-[#1D9E75] hover:bg-[#E1F5EE] dark:hover:bg-[#0a3329]'
+            evalStatus?.paused
+              ? 'border border-[#1D9E75] text-[#1D9E75] dark:border-[#1D9E75] hover:bg-[#E1F5EE] dark:hover:bg-[#0a3329]'
+              : 'border border-amber-400 text-amber-600 dark:text-amber-400 dark:border-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'
           }`}
         >
-          <span className={`inline-block w-2 h-2 rounded-full ${evalStatus?.in_progress ? 'bg-amber-400 animate-pulse' : 'bg-[#1D9E75]'}`} />
-          {evalStatus?.in_progress
-            ? (pauseMut.isPending ? 'Pausing…' : 'Pause')
-            : (resumeMut.isPending ? 'Resuming…' : 'Resume')
+          <span className={`inline-block w-2 h-2 rounded-full ${evalStatus?.paused ? 'bg-[#1D9E75]' : 'bg-amber-400 animate-pulse'}`} />
+          {evalStatus?.paused
+            ? (resumeMut.isPending ? 'Resuming…' : 'Resume')
+            : (pauseMut.isPending ? 'Pausing…' : 'Pause')
           }
         </button>
       )}

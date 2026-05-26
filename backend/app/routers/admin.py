@@ -485,15 +485,20 @@ def trigger_graph_fetch(
     body_to = req.to_date if req else ""
     body_tz_offset = req.tz_offset_minutes if req else 0
 
-    # Persist tz_offset so the periodic polling loop uses the correct local timezone
+    # Persist tz_offset and mark ingestion as active so the UI reflects "Auto" while fetching
     from app.models import SystemSetting
     _now = datetime.now(timezone.utc)
-    _tz_row = db.query(SystemSetting).filter(SystemSetting.key == "graph_tz_offset_minutes").first()
-    if _tz_row:
-        _tz_row.value = str(body_tz_offset)
-        _tz_row.updated_at = _now
-    else:
-        db.add(SystemSetting(key="graph_tz_offset_minutes", value=str(body_tz_offset), updated_at=_now))
+
+    def _upsert_setting(key: str, value: str) -> None:
+        row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = _now
+        else:
+            db.add(SystemSetting(key=key, value=value, updated_at=_now))
+
+    _upsert_setting("graph_tz_offset_minutes", str(body_tz_offset))
+    _upsert_setting("email_ingestion_method", "auto")
     db.commit()
 
     def _run() -> None:
