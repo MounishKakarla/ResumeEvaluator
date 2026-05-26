@@ -5,6 +5,10 @@ interface FilterControlsProps {
   setGradYearFrom: (v: number | '') => void
   gradYearTo: number | ''
   setGradYearTo: (v: number | '') => void
+  scoreFrom: number | ''
+  setScoreFrom: (v: number | '') => void
+  scoreTo: number | ''
+  setScoreTo: (v: number | '') => void
   filterStatus: string
   setFilterStatus: (v: string) => void
   filterLevel: string
@@ -32,6 +36,10 @@ export default function FilterControls({
   setGradYearFrom,
   gradYearTo,
   setGradYearTo,
+  scoreFrom,
+  setScoreFrom,
+  scoreTo,
+  setScoreTo,
   filterStatus,
   setFilterStatus,
   filterLevel,
@@ -105,6 +113,37 @@ export default function FilterControls({
         )}
       </div>
 
+      {/* Score Range Filter */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Score</span>
+        <input
+          type="number"
+          value={scoreFrom}
+          onChange={(e) => setScoreFrom(e.target.value ? Number(e.target.value) : '')}
+          placeholder="Min"
+          min={0}
+          max={100}
+          className="w-16 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
+        />
+        <span className="text-xs text-gray-400">–</span>
+        <input
+          type="number"
+          value={scoreTo}
+          onChange={(e) => setScoreTo(e.target.value ? Number(e.target.value) : '')}
+          placeholder="Max"
+          min={0}
+          max={100}
+          className="w-16 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
+        />
+        {(scoreFrom !== '' || scoreTo !== '') && (
+          <button
+            onClick={() => { setScoreFrom(''); setScoreTo('') }}
+            className="text-gray-400 hover:text-red-500 text-base leading-none transition-colors"
+            title="Clear score filter"
+          >×</button>
+        )}
+      </div>
+
       {/* Status filter */}
       <select
         className="border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
@@ -113,8 +152,7 @@ export default function FilterControls({
       >
         <option value="">All Statuses</option>
         <option value="shortlisted">Shortlisted</option>
-        <option value="pending">Pending</option>
-        <option value="review">Needs Review</option>
+        <option value="review">Next Consideration</option>
         <option value="rejected">Rejected</option>
       </select>
 

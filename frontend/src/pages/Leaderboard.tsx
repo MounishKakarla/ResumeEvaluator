@@ -137,6 +137,8 @@ export default function Leaderboard() {
   const [nameSearch, setNameSearch] = useState('')
   const [gradYearFrom, setGradYearFrom] = useState<number | ''>('')
   const [gradYearTo, setGradYearTo] = useState<number | ''>('')
+  const [scoreFrom, setScoreFrom] = useState<number | ''>('')
+  const [scoreTo, setScoreTo] = useState<number | ''>('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterLevel, setFilterLevel] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -379,6 +381,12 @@ export default function Leaderboard() {
     if (scoreRangeFilter) {
       arr = arr.filter((r) => r.total_score >= scoreRangeFilter.min && r.total_score < scoreRangeFilter.max + 10)
     }
+    if (scoreFrom !== '') {
+      arr = arr.filter((r) => r.total_score >= Number(scoreFrom))
+    }
+    if (scoreTo !== '') {
+      arr = arr.filter((r) => r.total_score <= Number(scoreTo))
+    }
     if (gradYearFrom !== '') {
       arr = arr.filter((r) => r.candidate_graduation_year != null && r.candidate_graduation_year >= Number(gradYearFrom))
     }
@@ -396,7 +404,7 @@ export default function Leaderboard() {
       arr = arr.filter((r) => (r.candidate_experience_level ?? 'entry') === filterLevel)
     }
     return arr
-  }, [rawItems, scoreRangeFilter, gradYearFrom, gradYearTo, filterStatus, filterLevel])
+  }, [rawItems, scoreRangeFilter, scoreFrom, scoreTo, gradYearFrom, gradYearTo, filterStatus, filterLevel])
 
   const items = useMemo(() => {
     const arr = [...baseItems]
@@ -551,6 +559,10 @@ export default function Leaderboard() {
         setGradYearFrom={setGradYearFrom}
         gradYearTo={gradYearTo}
         setGradYearTo={setGradYearTo}
+        scoreFrom={scoreFrom}
+        setScoreFrom={setScoreFrom}
+        scoreTo={scoreTo}
+        setScoreTo={setScoreTo}
         filterStatus={filterStatus}
         setFilterStatus={setFilterStatus}
         filterLevel={filterLevel}
@@ -569,8 +581,8 @@ export default function Leaderboard() {
         exportCSV={exportCSV}
         downloadResultsCsv={downloadResultsCsv}
         refreshResults={() => {
-          queryClient.invalidateQueries({ queryKey: ['results'] })
-          queryClient.invalidateQueries({ queryKey: ['results-summary'] })
+          queryClient.resetQueries({ queryKey: ['results', selectedJobRoleId] })
+          queryClient.invalidateQueries({ queryKey: ['results-summary', selectedJobRoleId] })
         }}
       />
 

@@ -18,15 +18,15 @@ const statusConfig: Record<StatusType, { label: string; classes: string }> = {
     classes: 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]',
   },
   review: {
-    label: 'Needs Review',
-    classes: 'bg-[#FAEEDA] text-[#633806] border-[#EF9F27]',
+    label: 'Next Consideration',
+    classes: 'bg-[#F5F3FF] text-[#5B21B6] border-[#7C3AED]',
   },
   rejected: {
     label: 'Rejected',
     classes: 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]',
   },
   pending: {
-    label: 'Pending',
+    label: 'On Hold',
     classes: 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600',
   },
   parsing: {

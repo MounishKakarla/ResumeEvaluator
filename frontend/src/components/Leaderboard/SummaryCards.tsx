@@ -19,7 +19,7 @@ export default function SummaryCards({
   // avgScore,
   shortlisted,
   needsReview,
-  pendingCount,
+  // pendingCount,
   autoRejected,
   tfidfFiltered,
   experienceFiltered,
@@ -31,18 +31,17 @@ export default function SummaryCards({
 }: SummaryCardsProps) {
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         {[
           { label: 'Total Evaluated', value: totalEvaluated, color: '#534AB7', bg: '#EEEDFE', fromSummary: false, tooltip: undefined },
           // { label: 'Avg Score', value: avgScore !== null ? `${avgScore}` : null, color: '#1D9E75', bg: '#E1F5EE', fromSummary: true, tooltip: undefined },
           { label: 'Shortlisted', value: summary ? shortlisted : null, color: '#EF9F27', bg: '#FAEEDA', fromSummary: true, tooltip: undefined },
-          { label: 'Pending', value: summary ? pendingCount : null, color: '#6366F1', bg: '#EEF2FF', fromSummary: true, tooltip: 'Scored but not yet reviewed' },
-          { label: 'Needs Review', value: summary ? needsReview : null, color: '#E24B4A', bg: '#FCEBEB', fromSummary: true, tooltip: 'Flagged for manual recruiter review' },
+          { label: 'Next Consideration', value: summary ? needsReview : null, color: '#7C3AED', bg: '#F5F3FF', fromSummary: true, tooltip: 'Flagged for manual recruiter review' },
           {
             label: 'Auto-Rejected',
             value: summary ? autoRejected : null,
-            color: '#7C3AED',
-            bg: '#F5F3FF',
+            color: '#E24B4A',
+            bg: '#FCEBEB',
             fromSummary: true,
             tooltip: `${tfidfFiltered} keyword mismatch + ${experienceFiltered} experience mismatch — auto-disqualified before recruiter review`,
           },
@@ -65,7 +64,7 @@ export default function SummaryCards({
                 <span className="text-base opacity-40">—</span>
               ) : value}
             </p>
-            {label === 'Needs Review' && summary && (
+            {label === 'Next Consideration' && summary && (
               <div className="mt-2 space-y-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1 text-[11px]" style={{ color: color + 'CC' }}>

@@ -324,7 +324,9 @@ export default function CandidateTable({
         <span className="text-xs text-gray-400 dark:text-gray-500">{item.evaluated_at ? formatDate(item.evaluated_at) : '—'}</span>
       </td>
       <td className="px-4 py-3">
-        <StatusBadge status={item.status as Parameters<typeof StatusBadge>[0]['status']} />
+        <StatusBadge
+          status={(item.status === 'pending' ? 'review' : item.status) as Parameters<typeof StatusBadge>[0]['status']}
+        />
       </td>
       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
         {isAdmin ? (
