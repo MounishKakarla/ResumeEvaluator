@@ -114,6 +114,7 @@ export default function FilterControls({
         <option value="">All Statuses</option>
         <option value="shortlisted">Shortlisted</option>
         <option value="pending">Pending</option>
+        <option value="review">Needs Review</option>
         <option value="rejected">Rejected</option>
       </select>
 

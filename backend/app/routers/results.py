@@ -211,7 +211,11 @@ def list_results(
                 skills_total=skills_total_map.get(ev.job_role_id, 0),
                 project_match_score=ev.project_score / 100.0,
                 project_match_label=project_match_label,
-                status=latest_sl or "pending",
+                status=latest_sl or (
+                    "review" if (cand and cand.needs_manual_review)
+                    else "rejected" if ev.eval_status in ("tfidf_filtered", "experience_filtered")
+                    else "pending"
+                ),
                 needs_manual_review=cand.needs_manual_review if cand else False,
                 evaluated_at=ev.evaluated_at,
                 email_sent_at=ev.email_sent_at,
@@ -961,6 +965,21 @@ def results_summary(
     tfidf_filtered: int = base.filter(Evaluation.eval_status == "tfidf_filtered").count()
     experience_filtered: int = base.filter(Evaluation.eval_status == "experience_filtered").count()
 
+    # pending = no shortlist record + not flagged for review + not auto-rejected/queued
+    has_shortlist_subq = (
+        db.query(Shortlist.id)
+        .filter(Shortlist.evaluation_id == Evaluation.id)
+        .exists()
+    )
+    pending: int = base.filter(
+        ~has_shortlist_subq,
+        Candidate.needs_manual_review.is_(False),
+        or_(
+            Evaluation.eval_status.is_(None),
+            Evaluation.eval_status.notin_(["tfidf_filtered", "experience_filtered", "queued"]),
+        ),
+    ).count()
+
     queued_q = (
         db.query(Evaluation)
         .join(ResumeVersion, Evaluation.resume_id == ResumeVersion.id)
@@ -979,6 +998,7 @@ def results_summary(
         "avg_score": avg_score,
         "shortlisted": shortlisted,
         "needs_review": needs_review,
+        "pending": pending,
         "tfidf_filtered": tfidf_filtered,
         "experience_filtered": experience_filtered,
         "queued": queued,

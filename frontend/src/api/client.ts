@@ -222,7 +222,7 @@ export interface CandidateResult {
   matched_skill_names: string[]
   project_match_score: number
   project_match_label: 'High' | 'Med' | 'Low'
-  status: ShortlistStatus | 'parsing' | 'scoring' | 'done' | 'error'
+  status: ShortlistStatus | 'pending' | 'parsing' | 'scoring' | 'done' | 'error'
   job_role_id: number
   job_role_title: string
   needs_manual_review: boolean
@@ -501,6 +501,7 @@ export interface ResultsSummary {
   avg_score: number
   shortlisted: number
   needs_review: number
+  pending: number
   tfidf_filtered: number
   experience_filtered: number
   queued: number

@@ -3,6 +3,7 @@ interface SummaryCardsProps {
   avgScore: number | null
   shortlisted: number
   needsReview: number
+  pendingCount: number
   autoRejected: number | null
   tfidfFiltered: number
   experienceFiltered: number
@@ -15,9 +16,10 @@ interface SummaryCardsProps {
 
 export default function SummaryCards({
   totalEvaluated,
-  avgScore,
+  // avgScore,
   shortlisted,
   needsReview,
+  pendingCount,
   autoRejected,
   tfidfFiltered,
   experienceFiltered,
@@ -32,9 +34,10 @@ export default function SummaryCards({
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
           { label: 'Total Evaluated', value: totalEvaluated, color: '#534AB7', bg: '#EEEDFE', fromSummary: false, tooltip: undefined },
-          { label: 'Avg Score', value: avgScore !== null ? `${avgScore}` : null, color: '#1D9E75', bg: '#E1F5EE', fromSummary: true, tooltip: undefined },
+          // { label: 'Avg Score', value: avgScore !== null ? `${avgScore}` : null, color: '#1D9E75', bg: '#E1F5EE', fromSummary: true, tooltip: undefined },
           { label: 'Shortlisted', value: summary ? shortlisted : null, color: '#EF9F27', bg: '#FAEEDA', fromSummary: true, tooltip: undefined },
-          { label: 'Needs Review', value: summary ? needsReview : null, color: '#E24B4A', bg: '#FCEBEB', fromSummary: true, tooltip: undefined },
+          { label: 'Pending', value: summary ? pendingCount : null, color: '#6366F1', bg: '#EEF2FF', fromSummary: true, tooltip: 'Scored but not yet reviewed' },
+          { label: 'Needs Review', value: summary ? needsReview : null, color: '#E24B4A', bg: '#FCEBEB', fromSummary: true, tooltip: 'Flagged for manual recruiter review' },
           {
             label: 'Auto-Rejected',
             value: summary ? autoRejected : null,
@@ -62,6 +65,19 @@ export default function SummaryCards({
                 <span className="text-base opacity-40">—</span>
               ) : value}
             </p>
+            {label === 'Needs Review' && summary && (
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1 text-[11px]" style={{ color: color + 'CC' }}>
+                    <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    </svg>
+                    Manual Review
+                  </span>
+                  <span className="text-[11px] font-semibold tabular-nums" style={{ color }}>{needsReview}</span>
+                </div>
+              </div>
+            )}
             {label === 'Auto-Rejected' && summary && (
               <div className="mt-2 space-y-1">
                 <div className="flex items-center justify-between gap-2">

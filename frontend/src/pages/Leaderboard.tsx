@@ -386,7 +386,11 @@ export default function Leaderboard() {
       arr = arr.filter((r) => r.candidate_graduation_year != null && r.candidate_graduation_year <= Number(gradYearTo))
     }
     if (filterStatus) {
-      arr = arr.filter((r) => r.status === filterStatus)
+      if (filterStatus === 'pending') {
+        arr = arr.filter((r) => r.status === 'pending' && r.filter_stage === 'llm_scored')
+      } else {
+        arr = arr.filter((r) => r.status === filterStatus)
+      }
     }
     if (filterLevel) {
       arr = arr.filter((r) => (r.candidate_experience_level ?? 'entry') === filterLevel)
@@ -421,6 +425,7 @@ export default function Leaderboard() {
   const avgScore = summary ? Math.round(summary.avg_score) : null
   const shortlisted = summary?.shortlisted ?? 0
   const needsReview = summary?.needs_review ?? 0
+  const pendingCount = summary?.pending ?? 0
   const tfidfFiltered = summary?.tfidf_filtered ?? 0
   const experienceFiltered = summary?.experience_filtered ?? 0
   const autoRejected = tfidfFiltered + experienceFiltered
@@ -478,6 +483,7 @@ export default function Leaderboard() {
         avgScore={avgScore}
         shortlisted={shortlisted}
         needsReview={needsReview}
+        pendingCount={pendingCount}
         autoRejected={autoRejected}
         tfidfFiltered={tfidfFiltered}
         experienceFiltered={experienceFiltered}
