@@ -5,18 +5,18 @@ import type { InboundEmailItem, IngestionMethod } from '../api/client'
 import { useAppStore } from '../store/useAppStore'
 
 const STATUS_STYLES: Record<string, string> = {
-  processed:        'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]',
-  failed:           'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]',
-  no_attachment:    'bg-[#FFF8E7] text-[#633806] border-[#EF9F27]',
-  new:              'bg-[#F3F4F6] text-[#374151] border-[#D1D5DB]',
+  processed: 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]',
+  failed: 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]',
+  no_attachment: 'bg-[#FFF8E7] text-[#633806] border-[#EF9F27]',
+  new: 'bg-[#F3F4F6] text-[#374151] border-[#D1D5DB]',
   keyword_filtered: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600',
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  processed:        'Processed',
-  failed:           'Failed',
-  no_attachment:    'No Attachment',
-  new:              'Pending',
+  processed: 'Processed',
+  failed: 'Failed',
+  no_attachment: 'No Attachment',
+  new: 'Pending',
   keyword_filtered: 'Keyword Filtered',
 }
 
@@ -268,15 +268,11 @@ export default function EmailIngestion() {
       } catch (err) {
         console.error(err)
       }
-      try {
-        await setIngestionMethod('auto')
-        setSelectedMethod('auto')
-        queryClient.invalidateQueries({ queryKey: ['ingestionMethod'] })
-      } catch { /* non-fatal */ }
       setTimeout(() => {
         setGraphFetchMsg(null)
         queryClient.invalidateQueries({ queryKey: ['inboundEmails'] })
         queryClient.invalidateQueries({ queryKey: ['imapConfig'] })
+        queryClient.invalidateQueries({ queryKey: ['ingestionMethod'] })
       }, 5000)
     } catch {
       setGraphFetchMsg('Fetch trigger failed. Check server logs.')
@@ -317,7 +313,8 @@ export default function EmailIngestion() {
     queryKey: ['ingestionMethod'],
     queryFn: getIngestionMethod,
     enabled: isAdmin,
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchInterval: 8_000,
   })
 
   useEffect(() => {
@@ -393,11 +390,10 @@ export default function EmailIngestion() {
               </p>
             </div>
             {imapSettings && (
-              <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
-                imapSettings.configured
-                  ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
-                  : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
-              }`}>
+              <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${imapSettings.configured
+                ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
+                : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
+                }`}>
                 {imapSettings.configured ? 'Configured' : 'Not configured'}
               </span>
             )}
@@ -526,11 +522,10 @@ export default function EmailIngestion() {
             {imapFetchMsg && <span className="text-xs text-[#1D9E75] font-medium">{imapFetchMsg}</span>}
             {imapStopMsg && <span className="text-xs text-[#E24B4A] font-medium">{imapStopMsg}</span>}
             {testResult && (
-              <span className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${
-                testResult.ok
-                  ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
-                  : 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]'
-              }`}>
+              <span className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${testResult.ok
+                ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
+                : 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]'
+                }`}>
                 {testResult.ok ? `✓ ${testResult.message}` : `✗ ${testResult.error}`}
               </span>
             )}
@@ -556,11 +551,10 @@ export default function EmailIngestion() {
               </p>
             </div>
             {graphSettings && (
-              <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
-                graphSettings.configured
-                  ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
-                  : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
-              }`}>
+              <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${graphSettings.configured
+                ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
+                : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
+                }`}>
                 {graphSettings.configured ? 'Configured' : 'Not configured'}
               </span>
             )}
@@ -684,11 +678,10 @@ export default function EmailIngestion() {
             {graphFetchMsg && <span className="text-xs text-[#1D9E75] font-medium">{graphFetchMsg}</span>}
             {stopMsg && <span className="text-xs text-[#E24B4A] font-medium">{stopMsg}</span>}
             {graphTestResult && (
-              <span className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${
-                graphTestResult.ok
-                  ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
-                  : 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]'
-              }`}>
+              <span className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${graphTestResult.ok
+                ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
+                : 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]'
+                }`}>
                 {graphTestResult.ok ? `✓ ${graphTestResult.message}` : `✗ ${graphTestResult.error}`}
               </span>
             )}
@@ -717,9 +710,9 @@ export default function EmailIngestion() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {([
               { value: 'disabled', label: 'Disabled', desc: 'No polling', icon: '⏹', color: 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400' },
-              { value: 'auto',     label: 'Auto', desc: 'Graph if set, else IMAP', icon: '⚡', color: 'border-[#534AB7] text-[#534AB7] dark:text-[#AFA9EC]' },
-              { value: 'imap',    label: 'IMAP',      desc: 'Force IMAP only', icon: '📧', color: 'border-[#1D9E75] text-[#1D9E75]' },
-              { value: 'graph',   label: 'Microsoft Graph', desc: 'Force Graph API only', icon: '☁', color: 'border-[#0078D4] text-[#0078D4]' },
+              { value: 'auto', label: 'Auto', desc: 'Graph if set, else IMAP', icon: '⚡', color: 'border-[#534AB7] text-[#534AB7] dark:text-[#AFA9EC]' },
+              { value: 'imap', label: 'IMAP', desc: 'Force IMAP only', icon: '📧', color: 'border-[#1D9E75] text-[#1D9E75]' },
+              { value: 'graph', label: 'Microsoft Graph', desc: 'Force Graph API only', icon: '☁', color: 'border-[#0078D4] text-[#0078D4]' },
             ] as { value: IngestionMethod; label: string; desc: string; icon: string; color: string }[]).map(({ value, label, desc, icon, color }) => {
               const active = selectedMethod === value
               return (
@@ -727,11 +720,10 @@ export default function EmailIngestion() {
                   key={value}
                   type="button"
                   onClick={() => setSelectedMethod(value)}
-                  className={`flex flex-col items-start gap-1 rounded-xl border-2 px-4 py-3 text-left transition-all ${
-                    active
-                      ? `${color} bg-gray-50 dark:bg-gray-800 shadow-sm`
-                      : 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
+                  className={`flex flex-col items-start gap-1 rounded-xl border-2 px-4 py-3 text-left transition-all ${active
+                    ? `${color} bg-gray-50 dark:bg-gray-800 shadow-sm`
+                    : 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
                 >
                   <span className="text-lg leading-none">{icon}</span>
                   <span className="text-sm font-semibold leading-tight">{label}</span>
@@ -763,7 +755,7 @@ export default function EmailIngestion() {
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="font-semibold text-gray-800 dark:text-gray-100">Email Ingestion Pipeline</h2>
+            <h2 className="font-semibold text-gray-800 dark:text-gray-100">Email Inbound Pipeline</h2>
             {config?.method === 'graph' && (
               <p className="text-xs text-[#534AB7] dark:text-[#AFA9EC] mt-0.5 font-medium">via Microsoft Graph API</p>
             )}
@@ -772,11 +764,10 @@ export default function EmailIngestion() {
             )}
           </div>
           {!configLoading && config && (
-            <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
-              config.enabled
-                ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
-                : 'bg-[#F3F4F6] text-[#374151] border-[#D1D5DB]'
-            }`}>
+            <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${config.enabled
+              ? 'bg-[#E1F5EE] text-[#085041] border-[#5DCAA5]'
+              : 'bg-[#F3F4F6] text-[#374151] border-[#D1D5DB]'
+              }`}>
               {config.enabled ? 'Active' : 'Inactive — configure above'}
             </span>
           )}
@@ -838,8 +829,8 @@ export default function EmailIngestion() {
         )}
       </div>
 
-      {/* ── How It Works ──────────────────────────────────────── */}
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+      {/* ── How It Works (hidden) ─────────────────────────────── */}
+      {/* <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
         <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-3">How It Works</h3>
         <ol className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
           {[
@@ -858,7 +849,7 @@ export default function EmailIngestion() {
             </li>
           ))}
         </ol>
-      </div>
+      </div> */}
 
       {/* ── Email Log ─────────────────────────────────────────── */}
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
@@ -981,16 +972,14 @@ export default function EmailIngestion() {
                         )}
                       </td>
                       <td className="py-2.5 pr-4 text-center">
-                        <span className={`text-sm font-semibold ${
-                          email.attachment_count > 0 ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400'
-                        }`}>
+                        <span className={`text-sm font-semibold ${email.attachment_count > 0 ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400'
+                          }`}>
                           {email.attachment_count}
                         </span>
                       </td>
                       <td className="py-2.5 pr-4">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-                          STATUS_STYLES[email.status] ?? STATUS_STYLES.new
-                        }`}>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${STATUS_STYLES[email.status] ?? STATUS_STYLES.new
+                          }`}>
                           {STATUS_LABELS[email.status] ?? email.status}
                         </span>
                       </td>

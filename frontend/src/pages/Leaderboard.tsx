@@ -394,8 +394,8 @@ export default function Leaderboard() {
       arr = arr.filter((r) => r.candidate_graduation_year != null && r.candidate_graduation_year <= Number(gradYearTo))
     }
     if (filterStatus) {
-      if (filterStatus === 'pending') {
-        arr = arr.filter((r) => r.status === 'pending' && r.filter_stage === 'llm_scored')
+      if (filterStatus === 'review') {
+        arr = arr.filter((r) => r.status === 'review' || (r.status === 'pending' && r.filter_stage === 'llm_scored'))
       } else {
         arr = arr.filter((r) => r.status === filterStatus)
       }

@@ -19,7 +19,7 @@ export default function SummaryCards({
   // avgScore,
   shortlisted,
   needsReview,
-  // pendingCount,
+  pendingCount,
   autoRejected,
   tfidfFiltered,
   experienceFiltered,
@@ -36,7 +36,7 @@ export default function SummaryCards({
           { label: 'Total Evaluated', value: totalEvaluated, color: '#534AB7', bg: '#EEEDFE', fromSummary: false, tooltip: undefined },
           // { label: 'Avg Score', value: avgScore !== null ? `${avgScore}` : null, color: '#1D9E75', bg: '#E1F5EE', fromSummary: true, tooltip: undefined },
           { label: 'Shortlisted', value: summary ? shortlisted : null, color: '#EF9F27', bg: '#FAEEDA', fromSummary: true, tooltip: undefined },
-          { label: 'Next Consideration', value: summary ? needsReview : null, color: '#7C3AED', bg: '#F5F3FF', fromSummary: true, tooltip: 'Flagged for manual recruiter review' },
+          { label: 'Next Consideration', value: summary ? needsReview + pendingCount : null, color: '#7C3AED', bg: '#F5F3FF', fromSummary: true, tooltip: 'Flagged for manual recruiter review' },
           {
             label: 'Auto-Rejected',
             value: summary ? autoRejected : null,

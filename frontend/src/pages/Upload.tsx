@@ -80,6 +80,7 @@ export default function Upload() {
   })
 
   const [reparseMsg, setReparseMsg] = useState<string | null>(null)
+  const [resumeSearch, setResumeSearch] = useState('')
   const reparseAllMut = useMutation({
     mutationFn: reparseAllCandidates,
     onSuccess: (data) => {
@@ -495,7 +496,22 @@ export default function Upload() {
               </svg>
               Evaluated Resumes
             </h2>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative">
+                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  type="text"
+                  value={resumeSearch}
+                  onChange={(e) => setResumeSearch(e.target.value)}
+                  placeholder="Search name or email…"
+                  className="pl-8 pr-7 py-1 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 w-44 placeholder-gray-400"
+                />
+                {resumeSearch && (
+                  <button onClick={() => setResumeSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm leading-none">×</button>
+                )}
+              </div>
               <span className="text-xs text-gray-400">{storedResumes?.length || 0} Total</span>
               <button
                 onClick={() => reparseAllMut.mutate()}
@@ -531,7 +547,11 @@ export default function Upload() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {storedResumes.map((resume) => (
+              {storedResumes.filter((r) => {
+                if (!resumeSearch) return true
+                const q = resumeSearch.toLowerCase()
+                return (r.candidate_name?.toLowerCase().includes(q) || r.candidate_email?.toLowerCase().includes(q))
+              }).map((resume) => (
                 <div
                   key={resume.resume_id}
                   className="p-3 rounded-lg border border-gray-100 dark:border-gray-800 hover:border-[#534AB7]/30 transition-all flex items-center justify-between group"

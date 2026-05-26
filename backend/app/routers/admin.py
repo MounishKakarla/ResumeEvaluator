@@ -460,6 +460,7 @@ class TriggerFetchRequest(BaseModel):
 @router.post("/trigger-graph-fetch")
 def trigger_graph_fetch(
     req: Optional[TriggerFetchRequest] = Body(default=None),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Trigger an immediate Graph API email fetch in the background.
@@ -483,6 +484,17 @@ def trigger_graph_fetch(
     body_from = req.from_date if req else ""
     body_to = req.to_date if req else ""
     body_tz_offset = req.tz_offset_minutes if req else 0
+
+    # Persist tz_offset so the periodic polling loop uses the correct local timezone
+    from app.models import SystemSetting
+    _now = datetime.now(timezone.utc)
+    _tz_row = db.query(SystemSetting).filter(SystemSetting.key == "graph_tz_offset_minutes").first()
+    if _tz_row:
+        _tz_row.value = str(body_tz_offset)
+        _tz_row.updated_at = _now
+    else:
+        db.add(SystemSetting(key="graph_tz_offset_minutes", value=str(body_tz_offset), updated_at=_now))
+    db.commit()
 
     def _run() -> None:
         _stop_event.clear()
@@ -512,6 +524,25 @@ def trigger_graph_fetch(
         except Exception as exc:
             import logging as _logging
             _logging.getLogger(__name__).error("Manual Graph trigger error: %s", exc)
+        finally:
+            # Auto-disable ingestion after fetch completes so no further polling occurs
+            try:
+                _db = SessionLocal()
+                try:
+                    from app.models import SystemSetting as _SS
+                    _now2 = datetime.now(timezone.utc)
+                    _row = _db.query(_SS).filter(_SS.key == "email_ingestion_method").first()
+                    if _row:
+                        _row.value = "disabled"
+                        _row.updated_at = _now2
+                    else:
+                        _db.add(_SS(key="email_ingestion_method", value="disabled", updated_at=_now2))
+                    _db.commit()
+                finally:
+                    _db.close()
+            except Exception as _exc:
+                import logging as _logging2
+                _logging2.getLogger(__name__).error("Could not auto-disable ingestion: %s", _exc)
 
     threading.Thread(target=_run, daemon=True, name="graph-manual-trigger").start()
     return {"message": "Graph email fetch triggered in background. Check the email log in a moment."}

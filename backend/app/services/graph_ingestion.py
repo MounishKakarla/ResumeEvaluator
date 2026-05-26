@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 _RESUME_EXTENSIONS = {".pdf", ".docx", ".doc"}
 
 _worker_thread: Optional[threading.Thread] = None
-_stop_event = threading.Event()
+_stop_event = threading.Event()       # manual trigger stop signal only
+_poll_stop_event = threading.Event()  # periodic loop stop (graceful app shutdown only)
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ def _get_graph_config(db_session_factory) -> Optional[dict]:
             keywords = rows.get("graph_subject_keywords") or ""
             fetch_from_date = rows.get("graph_fetch_from_date") or ""
             fetch_to_date = rows.get("graph_fetch_to_date") or ""
+            tz_offset_minutes = int(rows.get("graph_tz_offset_minutes") or "0")
         finally:
             db.close()
     except Exception as exc:
@@ -80,6 +82,7 @@ def _get_graph_config(db_session_factory) -> Optional[dict]:
         "subject_keywords": kw_list,
         "fetch_from_date": fetch_from_date,
         "fetch_to_date": fetch_to_date,
+        "tz_offset_minutes": tz_offset_minutes,
     }
 
 
@@ -482,7 +485,7 @@ def _process_graph_message_with_retry(
 
 def _graph_ingestion_loop(upload_dir: str, poll_interval: int, db_session_factory) -> None:
     logger.info("Graph API ingestion worker started (poll_interval=%ds)", poll_interval)
-    while not _stop_event.is_set():
+    while not _poll_stop_event.is_set():
         try:
             cfg = _get_graph_config(db_session_factory)
             if cfg:
@@ -492,16 +495,16 @@ def _graph_ingestion_loop(upload_dir: str, poll_interval: int, db_session_factor
                     token, cfg["mailbox"], cfg["folder"],
                     from_date=cfg.get("fetch_from_date", ""),
                     to_date=cfg.get("fetch_to_date", ""),
+                    tz_offset_minutes=cfg.get("tz_offset_minutes", 0),
                 )
                 logger.info("Graph: found %d message(s) with attachments to process", len(messages))
                 for msg in messages:
-                    if _stop_event.is_set():
+                    if _poll_stop_event.is_set():
                         break
                     _process_graph_message_with_retry(
                         msg, token, cfg["mailbox"], upload_dir, db_session_factory,
                         subject_keywords=cfg["subject_keywords"],
                     )
-                    # Mark as read so it no longer appears in future hasAttachments polls
                     try:
                         _mark_as_read(token, cfg["mailbox"], msg["id"])
                     except Exception as exc:
@@ -510,7 +513,7 @@ def _graph_ingestion_loop(upload_dir: str, poll_interval: int, db_session_factor
                 logger.info("Graph API ingestion: disabled or not configured, skipping poll")
         except Exception as exc:
             logger.error("Graph ingestion loop error: %s", exc)
-        _stop_event.wait(timeout=poll_interval)
+        _poll_stop_event.wait(timeout=poll_interval)
 
 
 def start_graph_ingestion_worker(poll_interval: int = 0) -> None:
@@ -525,7 +528,7 @@ def start_graph_ingestion_worker(poll_interval: int = 0) -> None:
         logger.info("Graph API ingestion worker already running")
         return
 
-    _stop_event.clear()
+    _poll_stop_event.clear()
     _worker_thread = threading.Thread(
         target=_graph_ingestion_loop,
         args=(settings.upload_dir, poll_interval, SessionLocal),
@@ -537,6 +540,6 @@ def start_graph_ingestion_worker(poll_interval: int = 0) -> None:
 
 
 def stop_graph_ingestion_worker() -> None:
-    _stop_event.set()
+    _poll_stop_event.set()
     if _worker_thread and _worker_thread.is_alive():
         _worker_thread.join(timeout=10)
