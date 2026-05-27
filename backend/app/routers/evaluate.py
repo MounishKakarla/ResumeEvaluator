@@ -248,7 +248,16 @@ def _run_auto_enrichment(
         ]
 
         github_summary: Optional[dict] = None
-        if not candidate.github_summary:
+        needs_enrich = True
+        if candidate.github_summary:
+            try:
+                github_summary = json.loads(candidate.github_summary)
+                if github_summary and not github_summary.get("error"):
+                    needs_enrich = False
+            except Exception:
+                pass
+
+        if needs_enrich:
             try:
                 from app.services.github_analyzer import analyze_github_profile
                 github_summary = analyze_github_profile(
@@ -268,11 +277,6 @@ def _run_auto_enrichment(
                 )
             except Exception as exc:
                 logger.warning("Auto GitHub enrichment failed for candidate %d: %s", candidate.id, exc)
-        else:
-            try:
-                github_summary = json.loads(candidate.github_summary)
-            except Exception:
-                pass
 
         if github_summary:
             modifier += _github_score_modifier(github_summary, project_names)
