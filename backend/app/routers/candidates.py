@@ -298,7 +298,10 @@ def reparse_all_candidates(
 ) -> dict:
     """Re-extract name and graduation year for every active candidate that has a current resume."""
     from app.models import Resume, ResumeVersion
-    from app.services.parser import extract_name, extract_graduation_year
+    from app.services.parser import (
+        extract_name, extract_name_from_pdf_fonts,
+        extract_graduation_year, extract_metadata_via_llm, is_plausible_name,
+    )
     from app.services.segmenter import segment_text
 
     candidates = db.query(Candidate).filter(Candidate.deleted_at.is_(None)).all()
@@ -312,7 +315,17 @@ def reparse_all_candidates(
         if not rv or not rv.resume or not rv.resume.raw_text:
             continue
         raw_text = rv.resume.raw_text
-        new_name = extract_name(raw_text)
+        # 1st: font-size (largest text in top 30% of page 1 — immune to column ordering)
+        # 2nd: regex on extracted text (geographic/non-name blacklist)
+        # 3rd: LLM validated against the same blacklist
+        new_name = extract_name_from_pdf_fonts(rv.file_path or "")
+        if not new_name:
+            new_name = extract_name(raw_text)
+        if not new_name:
+            llm_meta = extract_metadata_via_llm(raw_text) or {}
+            llm_name = (llm_meta.get("name") or "").strip()
+            if llm_name and is_plausible_name(llm_name):
+                new_name = llm_name
         if new_name and new_name != candidate.name:
             candidate.name = new_name
             updated += 1
@@ -331,8 +344,11 @@ def reparse_candidate(
     _current_user=Depends(get_current_user),
 ) -> CandidateSearchItem:
     """Re-extract name and graduation year from the stored resume text using the current parser."""
+    from app.services.parser import (
+        extract_name, extract_name_from_pdf_fonts,
+        extract_graduation_year, extract_metadata_via_llm, is_plausible_name,
+    )
     from app.models import Resume, ResumeVersion
-    from app.services.parser import extract_name, extract_graduation_year
     from app.services.segmenter import segment_text
 
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
@@ -350,7 +366,17 @@ def reparse_candidate(
     raw_text = rv.resume.raw_text
     changes: dict = {}
 
-    new_name = extract_name(raw_text)
+    # 1st: font-size (largest text in top 30% of page 1)
+    # 2nd: regex on extracted text (geographic/non-name blacklist)
+    # 3rd: LLM validated against the same blacklist
+    new_name = extract_name_from_pdf_fonts(rv.file_path or "")
+    if not new_name:
+        new_name = extract_name(raw_text)
+    if not new_name:
+        llm_meta = extract_metadata_via_llm(raw_text) or {}
+        llm_name = (llm_meta.get("name") or "").strip()
+        if llm_name and is_plausible_name(llm_name):
+            new_name = llm_name
     if new_name and new_name != candidate.name:
         changes["name"] = [candidate.name, new_name]
         candidate.name = new_name

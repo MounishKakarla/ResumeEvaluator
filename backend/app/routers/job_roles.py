@@ -59,6 +59,7 @@ def _detail(role: JobRole, skill_ids: List[int], skill_names: List[str], skill_r
         min_graduation_year=getattr(role, "min_graduation_year", None),
         max_graduation_year=getattr(role, "max_graduation_year", None),
         is_entry_level=getattr(role, "is_entry_level", False) or False,
+        require_github=getattr(role, "require_github", False) or False,
     )
 
 
@@ -187,6 +188,7 @@ def create_job_role(
         min_graduation_year=body.min_graduation_year or None,
         max_graduation_year=body.max_graduation_year or None,
         is_entry_level=body.is_entry_level,
+        require_github=body.require_github,
     )
     db.add(role)
     db.flush()
@@ -248,6 +250,7 @@ def update_job_role(
     role.min_graduation_year = body.min_graduation_year or None
     role.max_graduation_year = body.max_graduation_year or None
     role.is_entry_level = body.is_entry_level
+    role.require_github = body.require_github
 
     db.query(JobRoleSkill).filter(JobRoleSkill.job_role_id == role_id).delete()
     flags = body.skill_required_flags or []

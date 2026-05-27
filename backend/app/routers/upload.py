@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime
 
@@ -27,9 +28,11 @@ from app.services.parser import (
     extract_graduation_year,
     extract_metadata_via_llm,
     extract_name,
+    extract_name_from_pdf_fonts,
     extract_phone,
     extract_years_experience,
     infer_experience_level,
+    is_plausible_name,
     parse_document,
 )
 from app.services.segmenter import segment_text
@@ -154,13 +157,41 @@ def _process_resume(
 
     if not candidate_email:
         candidate_email = resume_email
+    # Always attempt extraction — even when a name was provided — so we can
+    # correct previously stored wrong names when the same candidate re-uploads.
+    extracted: str | None = extract_name_from_pdf_fonts(file_path)
+    if not extracted:
+        extracted = extract_name(parsed.text)
+    if not extracted:
+        llm_name = (llm_meta.get("name") or "").strip()
+        if llm_name and is_plausible_name(llm_name):
+            extracted = llm_name
+    # `name_from_resume` = True only when extraction actually found a name;
+    # used later to decide whether to overwrite an existing candidate's name.
+    name_from_resume = bool(extracted)
+
     if not candidate_name or candidate_name == filename.rsplit(".", 1)[0]:
-        extracted = llm_meta.get("name") or extract_name(parsed.text)
         if extracted:
             candidate_name = extracted
         elif candidate_email:
             username = candidate_email.split("@")[0]
             candidate_name = username.replace(".", " ").replace("_", " ").replace("-", " ").title()
+        else:
+            # Last resort: salvage a clean name from the filename.
+            # "Murali Marupudi_Software Engineer 1" → "Murali Marupudi"
+            stem = filename.rsplit(".", 1)[0]
+            first_seg = re.split(r'[_]', stem)[0].strip()
+            clean_stem = re.sub(r'[-]', ' ', first_seg).strip()
+            clean_stem = re.sub(r'\s+\d+$', '', clean_stem).strip()
+            clean_stem = re.sub(r'\s+(resume|cv|updated|new|final|copy)\s*$', '', clean_stem, flags=re.I).strip()
+            if clean_stem and is_plausible_name(clean_stem):
+                candidate_name = clean_stem.title()
+            else:
+                candidate_name = "Unknown Candidate"
+    elif extracted:
+        # A form-provided name exists, but extraction found a better value —
+        # prefer the resume-extracted name so wrong previous values get fixed.
+        candidate_name = extracted
 
     # --- Compute simhash fingerprint BEFORE any DB writes ---
     fingerprint = compute_fingerprint(parsed.text)
@@ -220,7 +251,13 @@ def _process_resume(
         db.add(candidate)
         db.flush()
     else:
-        if candidate_name and candidate.name in ("", "Unknown"):
+        # Update name if: (a) current name is empty/placeholder, OR
+        # (b) we extracted a real name from this resume and it differs —
+        # this corrects previously wrong auto-parsed names on re-upload.
+        if candidate_name and (
+            candidate.name in ("", "Unknown", "Unknown Candidate")
+            or (name_from_resume and candidate.name != candidate_name)
+        ):
             candidate.name = candidate_name
 
     # --- Extract social/portfolio links from resume text (LLM + regex) ---
@@ -473,6 +510,56 @@ async def upload_progress(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.get("/{resume_id}/file")
+def get_resume_file(
+    resume_id: int,
+    token: str = Query(default=""),
+    db: Session = Depends(get_db),
+):
+    """Retrieve the physical PDF/DOCX resume file by resume_id.
+    
+    Accepts JWT token in the query string since iframes / embed elements 
+    cannot send authorization headers.
+    """
+    from jose import JWTError
+    try:
+        token_data = decode_token(token)
+        if token_data.user_id is None:
+            raise ValueError
+        user = db.query(User).filter(User.id == token_data.user_id).first()
+        if user is None:
+            raise ValueError
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    rv = db.query(ResumeVersion).filter(ResumeVersion.id == resume_id).first()
+    if rv is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
+
+    if not rv.file_path or not os.path.exists(rv.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume file not found on disk")
+
+    # Determine media type
+    ext = os.path.splitext(rv.file_path)[1].lower()
+    is_pdf = ext == ".pdf"
+    media_type = "application/pdf" if is_pdf else "application/octet-stream"
+
+    # Use inline disposition for PDFs so the browser renders them in the iframe.
+    # For DOCX/DOC (which browsers cannot render) fall back to attachment download.
+    if is_pdf:
+        disposition = f"inline; filename=\"{rv.filename}\""
+    else:
+        safe_fname = rv.filename.replace('"', '')
+        disposition = f"attachment; filename=\"{safe_fname}\""
+
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        rv.file_path,
+        media_type=media_type,
+        headers={"Content-Disposition": disposition},
     )
 
 

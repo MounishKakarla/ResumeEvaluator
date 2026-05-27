@@ -132,10 +132,18 @@ export default function AuditLogs() {
                             const entries = Object.entries(parsedDetails)
                             if (entries.length === 0) return <span className="italic text-gray-400">—</span>
 
-                            return entries.map(([field, val]) => {
+                             return entries.map(([field, val]) => {
                               const isPair = Array.isArray(val) && val.length === 2
                               const oldVal = isPair ? val[0] : undefined
                               const newVal = isPair ? val[1] : val
+
+                              const formatVal = (v: any) => {
+                                if (v === undefined || v === null || v === '') return '—'
+                                if ((field === 'tfidf_score' || field === 'tfidf_threshold') && typeof v === 'number') {
+                                  return `${Math.round(v * 100)}%`
+                                }
+                                return String(v)
+                              }
 
                               return (
                                 <span key={field} className="mr-3 inline-block">
@@ -143,11 +151,11 @@ export default function AuditLogs() {
                                   {': '}
                                   {isPair ? (
                                     <>
-                                      <span className="line-through text-gray-400">{String(oldVal ?? '—')}</span>
+                                      <span className="line-through text-gray-400">{formatVal(oldVal)}</span>
                                       {' → '}
                                     </>
                                   ) : null}
-                                  <span className="text-gray-800 dark:text-gray-200 font-medium">{String(newVal ?? '—')}</span>
+                                  <span className="text-gray-800 dark:text-gray-200 font-medium">{formatVal(newVal)}</span>
                                 </span>
                               )
                             })

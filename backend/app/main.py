@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import create_db_tables, fix_section_header_candidate_names
 from app.middleware.rate_limit import RateLimitMiddleware
-from app.routers import admin, analytics, audit, auth, candidates, comments, enrichment, evaluate, inbound_emails, interview_feedback, job_roles, results, shortlist, skills, upload
+from app.routers import admin, analytics, audit, auth, candidates, comments, enrichment, evaluate, inbound_emails, interview_feedback, job_roles, manual_eval, onedrive, results, sharepoint, shortlist, skills, upload
 
 # ---------------------------------------------------------------------------
 # Structured logging setup (runs before anything else)
@@ -152,6 +152,9 @@ app.include_router(results.router)
 app.include_router(shortlist.router)
 app.include_router(enrichment.router)
 app.include_router(inbound_emails.router)
+app.include_router(manual_eval.router)
+app.include_router(sharepoint.router)
+app.include_router(onedrive.router)
 
 # Serve uploaded files directly (fallback when nginx not in front)
 os.makedirs(settings.upload_dir, exist_ok=True)

@@ -370,9 +370,14 @@ _SECTION_HEADER_BLACKLIST = {
 
 # Words that cannot appear in a person's name — used by extract_name to reject skill/section lines
 _NON_NAME_WORDS = {
-    # Document meta
+    # Document meta / field labels — these appear as "Name: John Smith" prefixes
     'resume', 'cv', 'curriculum', 'vitae', 'page', 'profile',
-    'contact', 'email', 'phone', 'address', 'website', 'portfolio',
+    'contact', 'email', 'phone', 'mobile', 'tel', 'fax',
+    'address', 'website', 'portfolio', 'linkedin', 'github',
+    'name', 'candidate', 'applicant', 'subject',
+    'location', 'city', 'state', 'country', 'nationality', 'gender',
+    'date', 'birth', 'dob', 'age', 'marital', 'status',
+    'declaration', 'signature', 'place',
     # Common section headings (individual words)
     'skills', 'technical', 'experience', 'education', 'projects',
     'summary', 'objective', 'achievements', 'certifications', 'interests',
@@ -405,6 +410,19 @@ _NON_NAME_WORDS = {
     'product', 'business', 'data', 'application', 'professional', 'trainee',
     'researcher', 'scientist', 'strategist', 'operations', 'marketing',
     'sales', 'finance', 'accounting', 'legal', 'compliance', 'support',
+    # Geographic — Indian cities, states, and countries that appear in address lines
+    # and must never be mistaken for a person's name (e.g. "Hyderabad, Telangana")
+    'hyderabad', 'telangana', 'bangalore', 'bengaluru', 'mumbai', 'delhi',
+    'chennai', 'kolkata', 'calcutta', 'pune', 'ahmedabad', 'jaipur',
+    'lucknow', 'kanpur', 'nagpur', 'indore', 'thane', 'bhopal', 'visakhapatnam',
+    'patna', 'vadodara', 'ghaziabad', 'ludhiana', 'agra', 'nashik', 'ranchi',
+    'surat', 'coimbatore', 'kochi', 'vijayawada', 'rajkot', 'meerut',
+    'india', 'karnataka', 'maharashtra', 'gujarat', 'rajasthan',
+    'andhra', 'pradesh', 'kerala', 'haryana', 'punjab', 'odisha',
+    'assam', 'jharkhand', 'uttarakhand', 'goa', 'bihar', 'chhattisgarh',
+    # Other common countries / regions
+    'usa', 'uk', 'canada', 'australia', 'singapore', 'germany',
+    'california', 'texas', 'york', 'london', 'remote',
 }
 
 
@@ -413,6 +431,10 @@ def _is_name_word(w: str) -> bool:
     w_clean = w.rstrip('.')
     if len(w_clean) == 1:
         return w_clean.isupper()  # single uppercase initial (e.g. "K" in "Mounish K")
+    # ALL CAPS surname or initial block like "TEJASWI", "KUMAR", "N"
+    if w_clean.isupper() and w_clean.isalpha():
+        return w_clean.lower() not in _NON_NAME_WORDS
+    # Standard Title Case word like "Smith", "Nair", "Mary-Jane"
     return bool(re.match(r'^[A-Z][a-z\-]+$', w_clean))
 
 
@@ -420,63 +442,196 @@ def _check_line_for_name(line: str) -> Optional[str]:
     """Return a name if `line` looks like a candidate name, else None."""
     if not line or any(c.isdigit() for c in line):
         return None
-    if any(tok in line for tok in ('@', '\\', 'http', 'linkedin', 'github')):
+    if any(tok in line.lower() for tok in ('@', '\\', 'http', 'linkedin', 'github', 'www.')):
+        return None
+
+    # Handle "Label: value" patterns — e.g. "Name: Rahul Kumar", "Candidate Name: Priya Sharma"
+    # Strip the label prefix and try to parse the value portion as a name.
+    label_match = re.match(r'^[A-Za-z\s]{1,20}:\s*(.+)$', line.strip())
+    if label_match:
+        value_part = label_match.group(1).strip()
+        # Only recurse if value_part has no colon (avoid double-recursion)
+        if ':' not in value_part and value_part:
+            return _check_line_for_name(value_part)
+        return None
+
+    # Strip non-name characters to get clean words first
+    clean_line = re.sub(r'[^a-zA-Z\s.\-]', '', line).strip().strip('.')
+    words = clean_line.split()
+    if not (2 <= len(words) <= 6):
+        return None
+    if clean_line.lower().rstrip('.') in _SECTION_HEADER_BLACKLIST:
+        return None
+
+    # Run blacklist check BEFORE comma-reversed pattern — this prevents
+    # "Hyderabad, Telangana" or "City, State" address lines from being
+    # incorrectly treated as a reversed name ("Telangana Hyderabad").
+    lower_words = {w.lower().rstrip('.') for w in words}
+    if lower_words & _NON_NAME_WORDS:
         return None
 
     # Normalise comma-reversed names: "Smith, John" → "John Smith"
-    comma_match = re.match(r'^([A-Z][A-Za-z]+),\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)$', line)
+    # Only after confirming neither word is a geographic/non-name term above.
+    comma_match = re.match(r'^([A-Z][A-Za-z\-]+),\s+([A-Z][A-Za-z\-]+(?:\s+[A-Z][A-Za-z\-]+)?)$', line.strip())
     if comma_match:
         candidate = f"{comma_match.group(2)} {comma_match.group(1)}"
         if candidate.lower() not in _SECTION_HEADER_BLACKLIST:
             return candidate
 
-    clean_line = re.sub(r'[^a-zA-Z\s.\-]', '', line).strip().strip('.')
-    words = clean_line.split()
-    if not (2 <= len(words) <= 5):
-        return None
-    if clean_line.lower().rstrip('.') in _SECTION_HEADER_BLACKLIST:
-        return None
-
-    lower_words = {w.lower().rstrip('.') for w in words}
-    if lower_words & _NON_NAME_WORDS:
-        return None
-
-    # Title Case check (handles initials like "J. Smith" or "Mounish K")
+    # Title Case + initials check — handles:
+    #   "John Smith", "J. Smith", "Mounish K", "N. V. S. Tejaswi", "N. V. S. TEJASWI"
     if all(_is_name_word(w) for w in words):
         non_initial = [w for w in words if len(w.rstrip('.')) > 1]
         if len(non_initial) >= 1:
-            return ' '.join(w.title() if w.isupper() else w for w in words)
+            # Normalise: Title Case everything; preserve dots on initials
+            return ' '.join(w[0].upper() + w[1:].lower() if (len(w.rstrip('.')) > 1 and w.rstrip('.').isupper()) else w for w in words)
 
-    # ALL CAPS check (e.g. "RAHUL NAIR")
+    # ALL CAPS check — e.g. "RAHUL NAIR", "N V S TEJASWI" (after dot-stripping)
     alpha_only = re.sub(r'[^a-zA-Z\s]', '', clean_line).strip()
     alpha_words = alpha_only.split()
-    if 2 <= len(alpha_words) <= 4 and alpha_only.isupper():
-        if alpha_only.lower() not in _SECTION_HEADER_BLACKLIST:
+    if 2 <= len(alpha_words) <= 5 and alpha_only.isupper():
+        alpha_lower = {w.lower() for w in alpha_words}
+        if not (alpha_lower & _NON_NAME_WORDS) and alpha_only.lower() not in _SECTION_HEADER_BLACKLIST:
             return alpha_only.title()
 
     return None
 
 
-def extract_name(text: str) -> Optional[str]:
-    """Return likely candidate name from the first ~15 lines.
+def is_plausible_name(name: str) -> bool:
+    """Return False if name contains geographic or non-name blacklisted words.
 
-    Handles Title Case, ALL CAPS, names with initials (J. Smith),
-    comma-reversed forms (SMITH, John), and pipe-separated headers
-    like "Siddhi Borawake | +91 9876543210 | email@gmail.com".
+    Used to validate LLM-extracted names before trusting them.
     """
-    for raw_line in text.splitlines()[:15]:
-        raw_line = raw_line.strip()
-        if not raw_line:
-            continue
+    if not name or not name.strip():
+        return False
+    clean = re.sub(r'[^a-zA-Z\s]', '', name).strip().lower()
+    words = clean.split()
+    if not words:
+        return False
+    if set(words) & _NON_NAME_WORDS:
+        return False
+    # Must have at least one word that looks like a real name word (title-cased check)
+    return any(_is_name_word(w.title()) for w in words)
 
-        # For pipe-separated header lines try just the first segment first
+
+def extract_name_from_pdf_fonts(path: str) -> Optional[str]:
+    """Extract the candidate name using font-size analysis (primary ATS method).
+
+    Real-world ATS (Greenhouse, Lever, Workday) rely on font-size signals: the
+    candidate's name is almost always the largest text in the top portion of the
+    first page.  This uses PyMuPDF span-level dicts to read font sizes per text
+    fragment, so two-column PDFs or address-before-name layouts don't confuse it.
+
+    Returns None for non-PDF paths, if fitz is unavailable, or if no plausible
+    name is found among the largest-font spans.
+    """
+    if not path.lower().endswith(".pdf"):
+        return None
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return None
+
+    try:
+        doc = fitz.open(path)
+        if not doc.page_count:
+            doc.close()
+            return None
+
+        page = doc[0]
+        page_height = page.rect.height
+        top_zone_limit = page_height * 0.30  # examine only the top 30% of page 1
+
+        span_data: list[dict] = []
+        for block in page.get_text("dict").get("blocks", []):
+            if block.get("type") != 0:  # skip image blocks
+                continue
+            for line in block.get("lines", []):
+                line_y0 = line["bbox"][1]
+                if line_y0 > top_zone_limit:
+                    continue
+                for span in line.get("spans", []):
+                    text = span.get("text", "").strip()
+                    if not text:
+                        continue
+                    span_data.append({
+                        "size": float(span.get("size", 0)),
+                        "y":    float(line["bbox"][1]),
+                        "x":    float(span["bbox"][0]),
+                        "text": text,
+                    })
+
+        doc.close()
+
+        if not span_data:
+            return None
+
+        max_size = max(s["size"] for s in span_data)
+        if max_size < 8:  # ignore pathologically small text
+            return None
+
+        # Collect spans within 1.5pt of the maximum font size, sorted top-left→right
+        large_spans = sorted(
+            [s for s in span_data if s["size"] >= max_size - 1.5],
+            key=lambda s: (round(s["y"] / 4) * 4, s["x"]),
+        )
+
+        # Group into visual lines by y-proximity (within 4pt ≈ same line)
+        lines: list[str] = []
+        current_bucket: Optional[int] = None
+        current_parts: list[str] = []
+        for s in large_spans:
+            bucket = round(s["y"] / 4)
+            if current_bucket is None or bucket != current_bucket:
+                if current_parts:
+                    lines.append(" ".join(current_parts))
+                current_bucket = bucket
+                current_parts = [s["text"]]
+            else:
+                current_parts.append(s["text"])
+        if current_parts:
+            lines.append(" ".join(current_parts))
+
+        # Try each reconstructed line through the name validator
+        for line_text in lines:
+            result = _check_line_for_name(line_text)
+            if result:
+                return result
+
+        # Last attempt: join all large-font lines (handles names split across spans)
+        if len(lines) > 1:
+            result = _check_line_for_name(" ".join(lines))
+            if result:
+                return result
+
+        return None
+
+    except Exception as exc:
+        logger.debug("Font-size name extraction failed for %s: %s", path, exc)
+        return None
+
+
+def extract_name(text: str) -> Optional[str]:
+    """Return the candidate's name by examining only the resume header.
+
+    Names appear on the FIRST line (or first two lines) of every resume.
+    We look at the first 6 non-empty lines only — scanning further risks
+    matching city/state address lines, job titles, or institution names.
+
+    Handles: Title Case, ALL CAPS, mixed-initials ("N. V. S. TEJASWI"),
+    comma-reversed ("Smith, John"), and pipe-separated contact headers
+    ("Siddhi Borawake | +91 … | email@gmail.com").
+    """
+    non_empty_lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+    for raw_line in non_empty_lines[:6]:
+        # Pipe-separated header: try only the first segment (the name part)
         if '|' in raw_line:
             first_segment = raw_line.split('|')[0].strip()
             result = _check_line_for_name(first_segment)
             if result:
                 return result
-            # Fall through: if first segment isn't a name, skip the full line
-            # (it's a contact-info row, not a name row)
+            # Entire line is a contact-info row — skip it, don't fall through
             continue
 
         result = _check_line_for_name(raw_line)
@@ -718,9 +873,18 @@ def extract_metadata_via_llm(text: str) -> Optional[dict]:
             timeout=float(settings.llm_timeout),
         )
 
+        # Send only the first 300 chars as a dedicated header block so the
+        # LLM focuses on the name at the top, then the full text for context.
+        header_block = text[:300].strip()
         sample = text[:8000]
         prompt = (
-            "Extract structured information from this resume. "
+            "Extract structured information from this resume.\n"
+            "IMPORTANT — for the 'name' field: the candidate's full name is ALWAYS "
+            "the very first prominent line at the top of the resume, before any "
+            "contact details, taglines, or section headings. It may be in ALL CAPS "
+            "or include initials with dots (e.g. 'N. V. S. Tejaswi', 'RAHUL KUMAR'). "
+            "Do NOT return a city, state, job title, university, or tagline as the name.\n\n"
+            f"Resume header (first 300 chars — name is here):\n{header_block}\n\n"
             "Return ONLY valid JSON with these exact keys (use null for missing fields):\n"
             '{"name":null,"email":null,"phone":null,"title":null,'
             '"experience_level":null,"years_experience":null,"graduation_year":null,'
@@ -732,7 +896,7 @@ def extract_metadata_via_llm(text: str) -> Optional[dict]:
             "Internship, trainee, and student positions do NOT count toward years_experience.\n"
             "If the candidate only has internship experience, set years_experience=null.\n"
             "graduation_year is a 4-digit integer.\n\n"
-            f"Resume:\n{sample}"
+            f"Full resume:\n{sample}"
         )
 
         response = client.chat.completions.create(

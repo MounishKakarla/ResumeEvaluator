@@ -113,6 +113,8 @@ class JobRoleCreate(BaseModel):
     # When True, all candidates for this role receive fresher-friendly scoring:
     # design-verb project boost, no recency decay, flat global skill coverage.
     is_entry_level: bool = False
+    # When True, GitHub presence is a required field. Missing github_url flags "Missed Requirement: GitHub".
+    require_github: bool = False
 
     @model_validator(mode="after")
     def _weights_must_sum_to_100(self) -> "JobRoleCreate":
@@ -151,6 +153,7 @@ class JobRoleOut(BaseModel):
     min_graduation_year: Optional[int] = None
     max_graduation_year: Optional[int] = None
     is_entry_level: bool = False
+    require_github: bool = False
 
     @field_validator("filter_experience_levels", mode="before")
     @classmethod
@@ -353,6 +356,7 @@ class EvaluationDetail(BaseModel):
     github_url: Optional[str] = None
     linkedin_url: Optional[str] = None
     portfolio_url: Optional[str] = None
+    tfidf_score: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +397,7 @@ class ResultsResponse(BaseModel):
     tfidf_score: Optional[float] = None          # Stage-1 TF-IDF cosine similarity
     filter_stage: str = "llm_scored"             # "llm_scored" | "tfidf_filtered"
     github_skill_gap_severity: Optional[str] = None  # "high" | "medium" | None
+    missed_requirements: List[str] = Field(default_factory=list)  # e.g. ["GitHub"]
 
 
 class PaginatedResults(BaseModel):
@@ -496,3 +501,26 @@ class EmailTemplateOut(BaseModel):
 class EmailTemplateUpdate(BaseModel):
     subject: str = Field(..., min_length=1, max_length=500)
     body_text: str = Field(..., min_length=1)
+
+
+# ---------------------------------------------------------------------------
+# Manual Evaluation
+# ---------------------------------------------------------------------------
+
+class ManualEvaluationCreate(BaseModel):
+    manual_score: float = Field(..., ge=0.0, le=100.0)
+    justification: Optional[str] = None
+    skills_checklist: Optional[dict] = None  # {skill_name: bool}
+
+
+class ManualEvaluationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    evaluation_id: int
+    recruiter_id: Optional[int] = None
+    manual_score: float
+    justification: Optional[str] = None
+    skills_checklist: Optional[dict] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None

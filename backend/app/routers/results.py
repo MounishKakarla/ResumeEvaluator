@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, desc, asc, or_, select as sa_select
 from sqlalchemy.orm import Session, joinedload
 
+from app.config import settings
 from app.deps import get_current_user, get_db
 from app.routers.audit import record_audit
 from app.models import (
@@ -190,6 +191,13 @@ def list_results(
         if ev.shortlists:
             latest_sl = max(ev.shortlists, key=lambda s: s.changed_at).status
 
+        # Compute missed top-level requirements (GitHub prime requirement)
+        missed_requirements: list[str] = []
+        if ev.job_role and getattr(ev.job_role, "require_github", False):
+            github_url = getattr(cand, "github_url", None) if cand else None
+            if not github_url:
+                missed_requirements.append("GitHub")
+
         items.append(
             ResultsResponse(
                 evaluation_id=ev.id,
@@ -238,6 +246,7 @@ def list_results(
                      if f.get("flag_type") == "github_skill_gap"),
                     None,
                 ),
+                missed_requirements=missed_requirements,
             )
         )
 
@@ -442,6 +451,7 @@ def get_result(
         github_url=cand.github_url if cand else None,
         linkedin_url=cand.linkedin_url if cand else None,
         portfolio_url=cand.portfolio_url if cand else None,
+        tfidf_score=ev.tfidf_score,
     )
 
 
@@ -814,6 +824,299 @@ def update_candidate_stage(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Failed to update stage") from exc
+
+
+@router.get("/compare-analysis")
+def compare_candidates_analysis(
+    a: int = Query(..., description="Evaluation ID of Candidate A"),
+    b: int = Query(..., description="Evaluation ID of Candidate B"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Compare two candidate evaluations and generate AI fit analysis."""
+    from app.models import Evaluation, Candidate, JobRole
+    import json
+
+    ev_a = (
+        db.query(Evaluation)
+        .options(
+            joinedload(Evaluation.resume)
+            .joinedload(Resume.version)
+            .joinedload(ResumeVersion.candidate),
+            joinedload(Evaluation.job_role)
+        )
+        .filter(Evaluation.id == a)
+        .first()
+    )
+    ev_b = (
+        db.query(Evaluation)
+        .options(
+            joinedload(Evaluation.resume)
+            .joinedload(Resume.version)
+            .joinedload(ResumeVersion.candidate),
+            joinedload(Evaluation.job_role)
+        )
+        .filter(Evaluation.id == b)
+        .first()
+    )
+
+    if not ev_a or not ev_b:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or both evaluations not found"
+        )
+
+    rv_a = ev_a.resume.version if ev_a.resume else None
+    cand_a = rv_a.candidate if rv_a else None
+
+    rv_b = ev_b.resume.version if ev_b.resume else None
+    cand_b = rv_b.candidate if rv_b else None
+
+    name_a = cand_a.name if cand_a else "Candidate A"
+    name_b = cand_b.name if cand_b else "Candidate B"
+
+    skills_a_list = json.loads(ev_a.skills_matched) if ev_a.skills_matched else []
+    skills_b_list = json.loads(ev_b.skills_matched) if ev_b.skills_matched else []
+
+    skills_a = [s["skill_name"] for s in skills_a_list if isinstance(s, dict) and "skill_name" in s]
+    skills_b = [s["skill_name"] for s in skills_b_list if isinstance(s, dict) and "skill_name" in s]
+
+    common_skills = list(set(skills_a) & set(skills_b))
+    only_a = list(set(skills_a) - set(skills_b))
+    only_b = list(set(skills_b) - set(skills_a))
+
+    def _compute_skill_gaps(ev) -> list:
+        try:
+            jrs_rows = db.query(JobRoleSkill).filter(JobRoleSkill.job_role_id == ev.job_role_id).all()
+            skill_ids = [j.skill_id for j in jrs_rows]
+            required_skills = db.query(Skill).filter(Skill.id.in_(skill_ids)).all()
+            matched_raw = json.loads(ev.skills_matched) if ev.skills_matched else []
+            matched_names = {s["skill_name"].lower() for s in matched_raw if isinstance(s, dict) and "skill_name" in s}
+            return [s.name for s in required_skills if s.name.lower() not in matched_names]
+        except Exception:
+            return []
+
+    gaps_a = _compute_skill_gaps(ev_a)
+    gaps_b = _compute_skill_gaps(ev_b)
+
+    role_title = ev_a.job_role.title if ev_a.job_role else "Target Role"
+
+    exp_a = f"{cand_a.years_experience} years" if cand_a and cand_a.years_experience is not None else "Not specified"
+    exp_b = f"{cand_b.years_experience} years" if cand_b and cand_b.years_experience is not None else "Not specified"
+
+    # ── GitHub enrichment ────────────────────────────────────────────────────
+    github_url_a = (cand_a.github_url or "") if cand_a else ""
+    github_url_b = (cand_b.github_url or "") if cand_b else ""
+
+    # Fetch live GitHub data if stored summary is absent and a URL exists
+    def _fetch_live_github(cand) -> dict:
+        url = (cand.github_url or "") if cand else ""
+        if not url:
+            return {}
+        try:
+            from app.services.github_analyzer import analyze_github_profile
+            job_skills = skills_a if cand == cand_a else skills_b
+            return analyze_github_profile(url, job_skills) or {}
+        except Exception:
+            return {}
+
+    _live_a: dict = {}
+    _live_b: dict = {}
+    if cand_a and not cand_a.github_summary and github_url_a:
+        _live_a = _fetch_live_github(cand_a)
+    if cand_b and not cand_b.github_summary and github_url_b:
+        _live_b = _fetch_live_github(cand_b)
+
+    def _github_summary_text(cand, live_data: dict = None) -> str:
+        raw_summary = None
+        if cand and cand.github_summary:
+            raw_summary = cand.github_summary
+        elif live_data:
+            raw_summary = json.dumps(live_data)
+        if not raw_summary:
+            return "No GitHub data available."
+        try:
+            gh = json.loads(raw_summary) if isinstance(raw_summary, str) else raw_summary
+            if not isinstance(gh, dict):
+                return "No GitHub data available."
+            # If GitHub returned an error (e.g. user not found), report it gracefully
+            if gh.get("error"):
+                return f"GitHub: {gh['error']}"
+            parts = []
+            if gh.get("public_repos") is not None:
+                parts.append(f"{gh['public_repos']} public repos")
+            if gh.get("total_stars") is not None:
+                parts.append(f"{gh['total_stars']} total stars")
+            if gh.get("followers") is not None:
+                parts.append(f"{gh['followers']} followers")
+            # 'languages' is a list of {"language": ..., "repo_count": ...} dicts
+            langs_raw = gh.get("languages") or gh.get("top_languages")
+            if langs_raw:
+                if isinstance(langs_raw, list):
+                    lang_names = [
+                        (l["language"] if isinstance(l, dict) else l)
+                        for l in langs_raw[:5]
+                        if l
+                    ]
+                    if lang_names:
+                        parts.append(f"top languages: {', '.join(lang_names)}")
+                elif isinstance(langs_raw, dict):
+                    sorted_langs = sorted(langs_raw.items(), key=lambda x: x[1], reverse=True)
+                    parts.append(f"top languages: {', '.join([l for l, _ in sorted_langs[:5]])}")
+            if gh.get("pinned_repos"):
+                pinned = [
+                    (r.get("name", r) if isinstance(r, dict) else r)
+                    for r in gh["pinned_repos"][:3]
+                ]
+                parts.append(f"notable projects: {', '.join(str(p) for p in pinned)}")
+            if gh.get("relevant_repos"):
+                rel = [r.get("name", "") for r in gh["relevant_repos"][:3] if isinstance(r, dict)]
+                if rel:
+                    parts.append(f"relevant repos: {', '.join(rel)}")
+            if gh.get("activity_score") is not None:
+                parts.append(f"activity score: {gh['activity_score']}/100")
+            # 'inferred_skills' is a list of {"name": ..., "source": ..., "evidence": [...]} dicts
+            if gh.get("inferred_skills"):
+                inferred = [
+                    (s["name"] if isinstance(s, dict) else s)
+                    for s in gh["inferred_skills"][:5]
+                    if s
+                ]
+                if inferred:
+                    parts.append(f"inferred skills: {', '.join(str(i) for i in inferred)}")
+            if gh.get("has_readme"):
+                parts.append("has profile README")
+            discrepancies = gh.get("discrepancies") or []
+            if discrepancies:
+                parts.append(f"⚠ discrepancies: {'; '.join(str(d) for d in discrepancies[:2])}")
+            return "; ".join(parts) if parts else "GitHub profile exists but no metrics available."
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("GitHub summary parse failed: %s | data: %.200s", exc, raw_summary)
+            return "No GitHub data available."
+
+    github_a = _github_summary_text(cand_a, _live_a)
+    github_b = _github_summary_text(cand_b, _live_b)
+
+    # ── Project analysis ────────────────────────────────────────────────────
+    def _project_text(ev) -> str:
+        label = getattr(ev, "project_match_label", None)
+        if label:
+            return f"Project alignment: {label}"
+        return "Project alignment: Not assessed"
+
+    proj_a = _project_text(ev_a)
+    proj_b = _project_text(ev_b)
+
+    # ── Education ────────────────────────────────────────────────────────────
+    grad_a = f"Graduation year: {cand_a.graduation_year}" if cand_a and cand_a.graduation_year else ""
+    grad_b = f"Graduation year: {cand_b.graduation_year}" if cand_b and cand_b.graduation_year else ""
+
+    # Deterministic best pick for structured field
+    best_pick_name = name_a if ev_a.total_score >= ev_b.total_score else name_b
+    score_diff = abs(ev_a.total_score - ev_b.total_score)
+
+    # ── AI Prompt Construction ───────────────────────────────────────────────
+    prompt = f"""You are a professional HR executive and expert technical recruiter.
+Compare these two candidates for the role of '{role_title}' and generate a highly professional, scannable comparative review detailing who is the best fit and why.
+
+Candidate A: {name_a}
+- Fit Score: {ev_a.total_score:.1f}/100
+- Matched Skills ({len(skills_a)}): {', '.join(skills_a) if skills_a else 'None'}
+- Unique Skills (not in Candidate B): {', '.join(only_a) if only_a else 'None'}
+- Years of Experience: {exp_a}
+- {proj_a}
+- {grad_a}
+- Missed Requirements: {', '.join(gaps_a) if gaps_a else 'None'}
+- GitHub Profile: {github_url_a or 'Not provided'}
+- GitHub Repositories & Activity: {github_a}
+
+Candidate B: {name_b}
+- Fit Score: {ev_b.total_score:.1f}/100
+- Matched Skills ({len(skills_b)}): {', '.join(skills_b) if skills_b else 'None'}
+- Unique Skills (not in Candidate A): {', '.join(only_b) if only_b else 'None'}
+- Years of Experience: {exp_b}
+- {proj_b}
+- {grad_b}
+- Missed Requirements: {', '.join(gaps_b) if gaps_b else 'None'}
+- GitHub Profile: {github_url_b or 'Not provided'}
+- GitHub Repositories & Activity: {github_b}
+
+Your comparative report MUST include ALL of the following sections:
+1. **Executive Summary**: A brief comparison of both profiles.
+2. **Key Strengths Comparison**: Contrast Candidate A vs Candidate B's unique technical and experience values.
+3. **GitHub Repository & Portfolio Analysis**: Deep-dive into their repositories — compare languages used, activity scores, relevant projects, inferred skills from repos, open-source contributions, and README quality. If one candidate lacks a GitHub profile or has low activity, explicitly flag it as a significant disadvantage for technical roles.
+4. **Common & Different Skills Analysis**: Explicitly discuss their technical alignment with the role requirements, noting which skills are demonstrated via GitHub vs. just listed on resume.
+5. **🏆 Final Hiring Recommendation**: Boldly declare WHO IS THE BEST PICK with a clear name in bold — explain rigorously with data-driven reasoning (scores, repo activity, skill coverage) why this candidate outperforms the other for this specific role.
+
+Write using clean, modern markdown (no code block ticks). Keep it concise, engaging, and professional."""
+
+    analysis = None
+    if settings.llm_api_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
+                timeout=settings.llm_timeout,
+            )
+            completion = client.chat.completions.create(
+                model=settings.llm_model,
+                messages=[
+                    {"role": "system", "content": "You are an expert technical recruiting advisor. Always conclude with a definitive hiring recommendation naming the best candidate."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+            )
+            analysis = completion.choices[0].message.content
+        except Exception as exc:
+            logger.warning("Comparison AI LLM call failed: %s", exc)
+
+    # Deterministic fallback if LLM not configured or fails
+    if not analysis:
+        winner = name_a if ev_a.total_score >= ev_b.total_score else name_b
+        winner_score = ev_a.total_score if ev_a.total_score >= ev_b.total_score else ev_b.total_score
+        loser = name_b if ev_a.total_score >= ev_b.total_score else name_a
+        loser_score = ev_b.total_score if ev_a.total_score >= ev_b.total_score else ev_a.total_score
+        winner_github = github_a if ev_a.total_score >= ev_b.total_score else github_b
+        loser_github = github_b if ev_a.total_score >= ev_b.total_score else github_a
+
+        analysis = f"""#### 1. Executive Summary
+A structured side-by-side evaluation was conducted between **{name_a}** (Score: **{ev_a.total_score:.0f}/100**) and **{name_b}** (Score: **{ev_b.total_score:.0f}/100**) for the **{role_title}** position. Based on skill alignment, experience, project metrics, and GitHub activity, **{winner}** is the stronger candidate.
+
+#### 2. Technical Profile Comparison
+- **Experience**: {name_a} — **{exp_a}** | {name_b} — **{exp_b}**
+- **Requirement Matching**: {name_a} matches **{len(skills_a)} skills** ({len(gaps_a)} gaps) | {name_b} matches **{len(skills_b)} skills** ({len(gaps_b)} gaps)
+- **Projects**: {proj_a} | {proj_b}
+
+#### 3. GitHub & Open-Source Activity
+- **{name_a}**: {github_a}
+- **{name_b}**: {github_b}
+
+#### 4. Core Differences & Skill Gaps
+- **Skills unique to {name_a}**: {', '.join([f'`{s}`' for s in only_a]) if only_a else 'None beyond matched set'}
+- **Skills unique to {name_b}**: {', '.join([f'`{s}`' for s in only_b]) if only_b else 'None beyond matched set'}
+- **Shared stack**: {', '.join([f'`{s}`' for s in common_skills]) if common_skills else 'No overlap'}
+
+#### 🏆 5. Final Hiring Recommendation
+**Best Pick: {winner}**
+
+**{winner}** is the clear choice for **{role_title}** with a fit score of **{winner_score:.0f}/100** vs {loser}'s **{loser_score:.0f}/100** — a **{score_diff:.0f}-point advantage**. {winner} covers more of the required technical stack, demonstrates stronger project alignment, and shows {winner_github if winner_github != 'No GitHub data available.' else 'comparable open-source activity'}. While {loser} brings value, the skill gap differential and lower overall score indicate they are better suited for a junior variant of this position or would require greater onboarding investment.
+"""
+
+    return {
+        "analysis": analysis,
+        "common_skills": common_skills,
+        "only_a": only_a,
+        "only_b": only_b,
+        "shared_count": len(common_skills),
+        "only_a_count": len(only_a),
+        "only_b_count": len(only_b),
+        "best_pick_name": best_pick_name,
+        "score_diff": round(score_diff, 1),
+        "github_a": github_a,
+        "github_b": github_b,
+    }
 
 
 # ---------------------------------------------------------------------------

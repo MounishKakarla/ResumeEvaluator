@@ -757,6 +757,20 @@ _TEMPLATE_DEFAULTS: dict = {
             "Best regards,\nTekTalentScan Recruitment Team"
         ),
     },
+    "github_request": {
+        "subject": "GitHub Profile Request — {job_title} Application",
+        "body_text": (
+            "Hi {candidate_name},\n\n"
+            "Thank you for applying for the {job_title} position.\n\n"
+            "As part of our technical evaluation process, we would love to review your GitHub profile "
+            "to get a better sense of your hands-on coding work, open-source contributions, and personal projects.\n\n"
+            "Could you please share your GitHub profile URL by replying to this email? "
+            "If you have any relevant public repositories or projects hosted elsewhere (GitLab, Bitbucket, portfolio site), "
+            "feel free to share those as well.\n\n"
+            "This helps us give your application a more complete and fair evaluation.\n\n"
+            "Best regards,\nTekTalentScan Recruitment Team"
+        ),
+    },
 }
 
 _TEMPLATE_LABELS: dict = {
@@ -764,6 +778,7 @@ _TEMPLATE_LABELS: dict = {
     "rejection": "Rejection",
     "coding_invite": "Coding Assessment Invite",
     "interview_invite": "Technical Interview Invite",
+    "github_request": "Request GitHub Profile",
 }
 
 

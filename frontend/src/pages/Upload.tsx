@@ -5,8 +5,9 @@ import { useAppStore } from '../store/useAppStore'
 import type { QueuedFile, DetectedSection } from '../store/useAppStore'
 import { uploadResume, getResumes, deleteResume, deleteAllResumes, archiveResume, runEvaluation, getJobRoles, getEvaluationStatus, reparseAllCandidates } from '../api/client'
 import type { UploadResponse, JobRole, ParseSettings, EvaluationStatus } from '../api/client'
-import UploadZone from '../components/UploadZone'
 import StatusBadge from '../components/StatusBadge'
+import UploadZone from '../components/UploadZone'
+
 
 
 const SECTION_COLORS: Record<string, string> = {
@@ -297,9 +298,17 @@ export default function Upload() {
     <div className="flex h-[calc(100vh-56px)]">
       {/* ── Left Panel ─────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col gap-4 p-6 overflow-y-auto">
+
+        {/* Manual Resume Upload */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-          <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-3">Upload Resumes</h2>
-          <UploadZone onFiles={handleFiles} onFolderClick={() => folderInputRef.current?.click()} />
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-1">Manual Resume Upload</h2>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+            Upload files or folders from your local machine to parse and extract resume details.
+          </p>
+          <UploadZone
+            onFiles={handleFiles}
+            onFolderClick={() => folderInputRef.current?.click()}
+          />
         </div>
 
         {/* Error banner */}

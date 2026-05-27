@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useQuery, useInfiniteQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/react-query'
 import {
   getResults,
@@ -18,7 +18,8 @@ import {
   getResultsSummary,
   pauseEvaluation,
   resumeEvaluation,
-  getEvaluationStatus
+  getEvaluationStatus,
+  getResumeFileUrl,
 } from '../api/client'
 import type { CandidateResult, CandidateStage, JobRole, ShortlistStatus } from '../api/client'
 import { useAppStore } from '../store/useAppStore'
@@ -26,6 +27,8 @@ import { useAppStore } from '../store/useAppStore'
 import SummaryCards from '../components/Leaderboard/SummaryCards'
 import FilterControls from '../components/Leaderboard/FilterControls'
 import CandidateTable from '../components/Leaderboard/CandidateTable'
+import ManualEvalPanel from '../components/Leaderboard/ManualEvalPanel'
+import NeedsReviewBuckets from '../components/Leaderboard/NeedsReviewBuckets'
 
 type SortKey = 'total_score' | 'candidate_name' | 'skills_matched' | 'years_experience'
 
@@ -80,6 +83,7 @@ function resultsToCSV(items: CandidateResult[]): string {
 
 export default function Leaderboard() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const selectedJobRoleId = useAppStore((s) => s.selectedJobRoleId)
   const userRole = useAppStore((s) => s.role)
@@ -142,6 +146,7 @@ export default function Leaderboard() {
   const [filterStatus, setFilterStatus] = useState('')
   const [filterLevel, setFilterLevel] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [panelItem, setPanelItem] = useState<CandidateResult | null>(null)
   const PAGE_SIZE = 50
 
   useEffect(() => {
@@ -541,6 +546,20 @@ export default function Leaderboard() {
             >
               Delete
             </button>
+            {selectedIds.size === 2 && (
+              <button
+                onClick={() => {
+                  const [a, b] = [...selectedIds]
+                  navigate(`/compare?a=${a}&b=${b}`)
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white dark:bg-gray-800 text-[#534AB7] border border-[#534AB7]/40 hover:bg-[#EEEDFE] transition-colors flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                Compare (2)
+              </button>
+            )}
           </div>
           <button
             onClick={() => setSelectedIds(new Set())}
@@ -584,32 +603,57 @@ export default function Leaderboard() {
           queryClient.resetQueries({ queryKey: ['results', selectedJobRoleId] })
           queryClient.invalidateQueries({ queryKey: ['results-summary', selectedJobRoleId] })
         }}
+        items={items}
       />
 
-      {/* Candidate Grid Table */}
-      <CandidateTable
-        items={items}
-        isLoading={isLoading}
-        isError={isError}
-        selectedIds={selectedIds}
-        toggleSelectAll={toggleSelectAll}
-        toggleSelect={toggleSelect}
-        blindMode={blindMode}
-        maskName={maskName}
-        maskEmail={maskEmail}
-        isAdmin={isAdmin}
-        stageMut={stageMut}
-        sendEmailMut={sendEmailMut}
-        emailMsg={emailMsg}
-        deleteMutation={deleteMutation}
-        groupByExp={false}
-        page={1}
-        PAGE_SIZE={PAGE_SIZE}
-        sortKey={sortKey}
-        sortDir={sortDir}
-        toggleSort={toggleSort}
-        selectedRole={selectedRole}
+      {/* Candidate Grid Table or Needs Review Buckets */}
+      {filterStatus === 'review' ? (
+        <NeedsReviewBuckets
+          items={items}
+          selectedRole={selectedRole}
+          bulkShortlistMut={bulkShortlistMut}
+          selectedIds={selectedIds}
+          toggleSelect={toggleSelect}
+          onOpenPreview={(resumeId, _name) => window.open(getResumeFileUrl(resumeId), '_blank')}
+          onManualEval={(item) => setPanelItem(item)}
+          deleteMutation={deleteMutation}
+          blindMode={blindMode}
+        />
+      ) : (
+        <CandidateTable
+          items={items}
+          isLoading={isLoading}
+          isError={isError}
+          selectedIds={selectedIds}
+          toggleSelectAll={toggleSelectAll}
+          toggleSelect={toggleSelect}
+          blindMode={blindMode}
+          maskName={maskName}
+          maskEmail={maskEmail}
+          isAdmin={isAdmin}
+          stageMut={stageMut}
+          sendEmailMut={sendEmailMut}
+          emailMsg={emailMsg}
+          deleteMutation={deleteMutation}
+          groupByExp={false}
+          page={1}
+          PAGE_SIZE={PAGE_SIZE}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          toggleSort={toggleSort}
+          selectedRole={selectedRole}
+          onOpenPreview={(resumeId, _name) => window.open(getResumeFileUrl(resumeId), '_blank')}
+          onManualEval={(item) => setPanelItem(item)}
+        />
+      )}
+
+      {/* Manual Evaluation Panel */}
+      <ManualEvalPanel
+        item={panelItem}
+        roleSkillNames={selectedRole?.skill_names ?? []}
+        onClose={() => setPanelItem(null)}
       />
+
 
       {/* Pagination Status / Infinite Scroll Indicator */}
       <div className="flex flex-col items-center justify-center py-4 px-1">

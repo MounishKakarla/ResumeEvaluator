@@ -22,7 +22,7 @@ import EnrichmentTab from '../components/CandidateDetail/EnrichmentTab'
 import FeedbackTab from '../components/CandidateDetail/FeedbackTab'
 import CommentsTab from '../components/CandidateDetail/CommentsTab'
 
-type Tab = 'breakdown' | 'resume' | 'enrichment' | 'notes' | 'feedback' | 'comments'
+type Tab = 'breakdown' | 'enrichment' | 'collaboration'
 
 const SKILL_CHIP_STYLES: Record<string, string> = {
   projects: 'bg-[#E1F5EE] text-[#1D9E75] border-[#5DCAA5]/40',
@@ -170,11 +170,8 @@ export default function CandidateDetail() {
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'breakdown', label: 'Score Breakdown' },
-    { key: 'resume', label: 'Resume Text' },
     { key: 'enrichment', label: 'Enrichment' },
-    { key: 'notes', label: 'Notes' },
-    { key: 'feedback', label: 'Interview Feedback' },
-    { key: 'comments', label: 'Team Comments' },
+    { key: 'collaboration', label: 'Notes & Feedback' },
   ]
 
   if (isLoading) {
@@ -548,6 +545,19 @@ export default function CandidateDetail() {
                 </div>
               </div>
 
+              {data.tfidf_score != null && (
+                <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">Keyword Relevance</p>
+                  <div>
+                    <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      <span>Relevance (TF-IDF)</span>
+                      <span className="font-medium text-gray-700 dark:text-gray-300">{Math.round(data.tfidf_score * 100)}%</span>
+                    </div>
+                    <ScoreBar score={data.tfidf_score * 100} />
+                  </div>
+                </div>
+              )}
+
               {/* Candidate Info */}
               <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
                 <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Candidate</p>
@@ -600,8 +610,8 @@ export default function CandidateDetail() {
           </div>
         )}
 
-        {/* Tab 2: Resume Text */}
-        {activeTab === 'resume' && (
+        {/* Resume Text tab — hidden (available via re-classify on Score Breakdown) */}
+        {false && activeTab === 'breakdown' && data && (
           <div className="p-6 space-y-4">
             {localSections.length > 0 ? (
               <>
@@ -682,14 +692,14 @@ export default function CandidateDetail() {
               <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
                 <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-4">Full Resume Text</h3>
                 <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 leading-relaxed font-mono bg-gray-50 dark:bg-gray-800 rounded-lg p-4 overflow-auto max-h-[60vh]">
-                  {data.resume_text || 'No text extracted.'}
+                  {data?.resume_text || 'No text extracted.'}
                 </pre>
               </div>
             )}
           </div>
         )}
 
-        {/* Tab 3: Enrichment */}
+        {/* Tab 2: Enrichment */}
         {activeTab === 'enrichment' && data && (
           <EnrichmentTab
             candidateId={data.candidate_id}
@@ -701,9 +711,11 @@ export default function CandidateDetail() {
         )}
 
 
-        {/* Tab 4: Notes */}
-        {activeTab === 'notes' && (
-          <div className="p-6 max-w-2xl">
+        {/* Tab 3: Notes & Feedback (Annotations + Interview Feedback + Team Comments) */}
+        {activeTab === 'collaboration' && data && (
+          <div className="space-y-0 divide-y divide-gray-100 dark:divide-gray-800">
+            {/* Annotations */}
+            <div className="p-6">
             <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 space-y-4">
               <h3 className="font-semibold text-gray-800 dark:text-gray-100">Annotations</h3>
 
@@ -722,7 +734,7 @@ export default function CandidateDetail() {
 
               <div>
                 <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Notes</label>
-                <textarea rows={6}
+                <textarea rows={5}
                   className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 resize-none"
                   placeholder="Add notes about this candidate…"
                   value={noteText}
@@ -739,19 +751,16 @@ export default function CandidateDetail() {
                 {shortlistMut.isError && <span className="text-xs text-[#791F1F]">Save failed</span>}
               </div>
             </div>
+            </div>
+
+            {/* Interview Feedback */}
+            <FeedbackTab candidateId={data.candidate_id} evaluationId={evaluationId} />
+
+            {/* Team Comments */}
+            <CommentsTab candidateId={data.candidate_id} />
           </div>
         )}
       </div>
-
-      {/* Tab 5: Interview Feedback */}
-      {activeTab === 'feedback' && data && (
-        <FeedbackTab candidateId={data.candidate_id} evaluationId={evaluationId} />
-      )}
-
-      {/* Tab 6: Team Comments */}
-      {activeTab === 'comments' && data && (
-        <CommentsTab candidateId={data.candidate_id} />
-      )}
 
       {/* ── Email Modal ─────────────────────────────────────────── */}
       {showEmailModal && (

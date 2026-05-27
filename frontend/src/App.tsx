@@ -12,6 +12,7 @@ import Landing from './pages/Landing'
 import Search from './pages/Search'
 import AuditLogs from './pages/AuditLogs'
 import Layout from './components/Layout'
+import CompareResumes from './pages/CompareResumes'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAppStore((s) => s.token)
@@ -120,6 +121,17 @@ export default function App() {
           <ProtectedRoute>
             <Layout>
               <Search />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/compare"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <CompareResumes />
             </Layout>
           </ProtectedRoute>
         }

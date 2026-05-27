@@ -206,6 +206,9 @@ class JobRole(Base):
     # When True, all candidates for this role are scored with fresher-friendly rules:
     # design-verb project boost (+15%), no recency decay, global skill coverage.
     is_entry_level = Column(Boolean, nullable=False, default=False)
+    # When True, GitHub profile link is treated as a top-level required field.
+    # Candidates missing a github_url are flagged with "Missed Requirement: GitHub".
+    require_github = Column(Boolean, nullable=False, default=False)
 
     # Relationships
     creator = relationship("User", back_populates="job_roles", foreign_keys=[created_by])
@@ -478,3 +481,31 @@ class CandidateComment(Base):
 
     candidate = relationship("Candidate")
     author = relationship("User")
+
+
+class ManualEvaluation(Base):
+    """Recruiter-authored manual evaluation / score override for a candidate."""
+
+    __tablename__ = "manual_evaluations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    evaluation_id = Column(
+        Integer,
+        ForeignKey("evaluations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    recruiter_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    manual_score = Column(Float, nullable=False)          # 0-100 override score
+    justification = Column(Text, nullable=True)            # recruiter free-text rationale
+    skills_checklist = Column(Text, nullable=True)         # JSON: {skill_name: bool}
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    evaluation = relationship("Evaluation")
+    recruiter = relationship("User")

@@ -25,6 +25,8 @@ interface CandidateTableProps {
   sortDir: 'asc' | 'desc'
   toggleSort: (key: any) => void
   selectedRole: any
+  onOpenPreview?: (resumeId: number, name: string) => void
+  onManualEval?: (item: any) => void
 }
 
 function RankBadge({ rank }: { rank: number }) {
@@ -113,6 +115,8 @@ export default function CandidateTable({
   sortDir,
   toggleSort,
   selectedRole,
+  onOpenPreview,
+  onManualEval,
 }: CandidateTableProps) {
   const navigate = useNavigate()
   const tableRef = useRef<HTMLTableElement>(null)
@@ -187,20 +191,34 @@ export default function CandidateTable({
       </td>
       <td className="px-4 py-3">
         <div className="flex items-center gap-2.5">
+          {/* PDF File Icon */}
+          {!blindMode && (
+            <button
+              title="Preview resume PDF"
+              onClick={(e) => { e.stopPropagation(); onOpenPreview?.(item.resume_id, displayName(item.candidate_name, item.candidate_email)) }}
+              className="w-6 h-6 flex items-center justify-center rounded text-gray-300 dark:text-gray-600 hover:text-[#534AB7] hover:bg-[#EEEDFE] dark:hover:bg-[#2d2a5a] transition-colors shrink-0"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </button>
+          )}
           <div className="w-8 h-8 rounded-full bg-[#534AB7] flex items-center justify-center shrink-0">
             <span className="text-xs text-white font-bold">
               {blindMode ? `C${idx + 1}` : getInitials(displayName(item.candidate_name, item.candidate_email))}
             </span>
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <p className="font-medium text-gray-800 dark:text-gray-100">{maskName(displayName(item.candidate_name, item.candidate_email), idx)}</p>
               {!blindMode && item.needs_manual_review && (
                 <span
                   title="Manual review required — discrepancies detected"
-                  className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]"
+                  className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#FCEBEB] text-[#E24B4A] shrink-0"
                 >
-                  ⚠ Review
+                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
                 </span>
               )}
               {!blindMode && item.github_skill_gap_severity && item.github_skill_gap_severity !== 'low' && (
@@ -210,16 +228,25 @@ export default function CandidateTable({
                       ? 'GitHub: claimed skills not evidenced in repositories (high concern)'
                       : 'GitHub: some claimed skills unverified in repositories'
                   }
-                  className={`inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                  className={`inline-flex items-center justify-center w-4 h-4 rounded-full shrink-0 ${
                     item.github_skill_gap_severity === 'high'
-                      ? 'bg-[#FCEBEB] text-[#791F1F] border-[#E24B4A]'
-                      : 'bg-[#FAEEDA] text-[#633806] border-[#EF9F27]'
+                      ? 'bg-[#FCEBEB] text-[#E24B4A]'
+                      : 'bg-[#FAEEDA] text-[#EF9F27]'
                   }`}
                 >
                   <svg className="w-2.5 h-2.5" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
                   </svg>
-                  {item.github_skill_gap_severity === 'high' ? 'GH ✗' : 'GH ~'}
+                </span>
+              )}
+              {!blindMode && item.missed_requirements?.includes('GitHub') && (
+                <span
+                  title="GitHub profile required for this role but not provided"
+                  className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-50 dark:bg-red-950/30 text-red-500 shrink-0"
+                >
+                  <svg className="w-2.5 h-2.5" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                  </svg>
                 </span>
               )}
             </div>
@@ -389,20 +416,33 @@ export default function CandidateTable({
         </td>
       )}
       <td className="px-4 py-3 text-right">
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            if (confirm('Delete this result?')) {
-              deleteMutation.mutate(item.evaluation_id)
-            }
-          }}
-          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-          title="Delete result"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-        </button>
+        <div className="flex items-center justify-end gap-1">
+          {onManualEval && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onManualEval(item) }}
+              className="p-1.5 text-gray-400 hover:text-[#534AB7] hover:bg-[#EEEDFE] dark:hover:bg-[#2d2a5a] rounded transition-colors"
+              title="Manual evaluation — override score"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              if (confirm('Delete this result?')) {
+                deleteMutation.mutate(item.evaluation_id)
+              }
+            }}
+            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+            title="Delete result"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
       </td>
     </tr>
   )

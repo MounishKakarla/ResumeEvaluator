@@ -101,6 +101,7 @@ export default function Configure() {
   const [minGradYear, setMinGradYear] = useState<number | ''>('')
   const [maxGradYear, setMaxGradYear] = useState<number | ''>('')
   const [isEntryLevel, setIsEntryLevel] = useState(false)
+  const [requireGithub, setRequireGithub] = useState(false)
 
 
   // ── Skill browser state ─────────────────────────────────────────────────
@@ -172,13 +173,18 @@ export default function Configure() {
     setPreferredMajors(role.preferred_majors ?? [])
     setShortlistTarget(role.shortlist_target ?? '')
     setMinFitScore(role.min_fit_score ?? '')
-    setTfidfThreshold(role.tfidf_threshold ?? 0)
+    setTfidfThreshold(
+      role.tfidf_threshold != null && role.tfidf_threshold > 0
+        ? Number((role.tfidf_threshold * 100).toFixed(1))
+        : 0
+    )
     setIntakePaused(role.intake_paused ?? false)
     setAutoEmailEnabled(role.auto_email_enabled ?? true)
     setFilterExpLevels(role.filter_experience_levels ?? [])
     setMinGradYear(role.min_graduation_year ?? '')
     setMaxGradYear(role.max_graduation_year ?? '')
     setIsEntryLevel(role.is_entry_level ?? false)
+    setRequireGithub(role.require_github ?? false)
     setTimeout(() => { isLoadingRoleRef.current = false }, 0)
   }
 
@@ -212,12 +218,13 @@ export default function Configure() {
         preferred_majors: preferredMajors,
         shortlist_target: shortlistTarget !== '' ? Number(shortlistTarget) : null,
         min_fit_score: minFitScore !== '' ? Number(minFitScore) : null,
-        tfidf_threshold: tfidfThreshold !== '' ? Number(tfidfThreshold) : 0,
+        tfidf_threshold: tfidfThreshold !== '' ? Number(tfidfThreshold) / 100 : 0,
         filter_experience_levels: filterExpLevels,
         auto_email_enabled: autoEmailEnabled,
         min_graduation_year: minGradYear !== '' ? Number(minGradYear) : null,
         max_graduation_year: maxGradYear !== '' ? Number(maxGradYear) : null,
         is_entry_level: isEntryLevel,
+        require_github: requireGithub,
       }
       if (selectedJobRoleId) return updateJobRole(selectedJobRoleId, payload)
       return createJobRole(payload)
@@ -311,6 +318,7 @@ export default function Configure() {
       setIntakePaused(false)
       setAutoEmailEnabled(true)
       setRequirements([])
+      setRequireGithub(false)
     },
   })
 
@@ -630,6 +638,25 @@ export default function Configure() {
             </button>
           </div>
 
+          {/* GitHub Prime Requirement Toggle */}
+          <div className="mt-4">
+            <label className="text-xs text-gray-500 dark:text-gray-400 mb-2 block">
+              GitHub Requirement
+              <span className="ml-1 font-normal text-gray-400 dark:text-gray-500">(candidates missing a GitHub profile are flagged with a "Missed Requirement: GitHub" badge)</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setRequireGithub(!requireGithub)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                requireGithub
+                  ? 'bg-[#534AB7] text-white border-[#534AB7]'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-[#534AB7]'
+              }`}
+            >
+              {requireGithub ? '✓ GitHub Required' : 'GitHub Optional'}
+            </button>
+          </div>
+
           {/* Graduation Year Range Filter */}
           <div className="mt-4">
             <label className="text-xs text-gray-500 dark:text-gray-400 mb-2 block">
@@ -746,26 +773,26 @@ export default function Configure() {
                 <input
                   type="number"
                   min={0}
-                  max={1}
-                  step={0.01}
+                  max={100}
+                  step={1}
                   className={`${inputCls} w-32`}
-                  placeholder="0.00"
+                  placeholder="0"
                   value={tfidfThreshold}
                   onChange={(e) => setTfidfThreshold(e.target.value !== '' ? Number(e.target.value) : '')}
                 />
                 {(() => {
                   const v = Number(tfidfThreshold) || 0
                   if (v === 0) return <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Disabled — all resumes go to LLM</span>
-                  if (v < 0.05) return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">Light filter — only clearly off-topic removed</span>
-                  if (v < 0.10) return <span className="text-xs px-2 py-0.5 rounded-full bg-[#E1F5EE] text-[#085041]">Recommended — good balance of speed vs accuracy</span>
-                  if (v < 0.20) return <span className="text-xs px-2 py-0.5 rounded-full bg-[#FAEEDA] text-[#633806]">Strict — may filter borderline-relevant resumes</span>
+                  if (v < 5) return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">Light filter — only clearly off-topic removed</span>
+                  if (v < 10) return <span className="text-xs px-2 py-0.5 rounded-full bg-[#E1F5EE] text-[#085041]">Recommended — good balance of speed vs accuracy</span>
+                  if (v < 20) return <span className="text-xs px-2 py-0.5 rounded-full bg-[#FAEEDA] text-[#633806]">Strict — may filter borderline-relevant resumes</span>
                   return <span className="text-xs px-2 py-0.5 rounded-full bg-[#FCEBEB] text-[#791F1F]">Very strict — high risk of false negatives</span>
                 })()}
               </div>
               <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
                 Before sending a resume to the AI scorer, a fast keyword-similarity check runs against the job description.
                 Resumes below this threshold are marked <span className="font-mono text-[10px] bg-gray-100 dark:bg-gray-700 px-1 rounded">tfidf_filtered</span> and skipped — reducing LLM cost on clearly irrelevant applicants.
-                Set to <span className="font-semibold">0</span> to disable entirely. Suggested starting value: <span className="font-semibold">0.08</span>.
+                Set to <span className="font-semibold">0</span> to disable entirely. Suggested starting value: <span className="font-semibold">8%</span>.
               </p>
             </div>
           </div>

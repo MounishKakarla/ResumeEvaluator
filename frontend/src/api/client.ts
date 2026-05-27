@@ -81,6 +81,7 @@ export interface JobRole {
   min_graduation_year?: number | null
   max_graduation_year?: number | null
   is_entry_level: boolean
+  require_github: boolean
 }
 
 export interface JobRoleCreate {
@@ -102,6 +103,7 @@ export interface JobRoleCreate {
   min_graduation_year?: number | null
   max_graduation_year?: number | null
   is_entry_level?: boolean
+  require_github?: boolean
 }
 
 // ─── Enrichment ──────────────────────────────────────────────────────────────
@@ -209,6 +211,7 @@ export interface SectionScore {
 export interface CandidateResult {
   evaluation_id: number
   candidate_id: number
+  resume_id: number
   candidate_name: string
   candidate_email: string
   candidate_phone?: string | null
@@ -233,6 +236,7 @@ export interface CandidateResult {
   tfidf_score: number | null
   filter_stage: 'llm_scored' | 'tfidf_filtered' | 'experience_filtered'
   github_skill_gap_severity?: 'low' | 'medium' | 'high' | null
+  missed_requirements?: string[]
 }
 
 export interface PaginatedResults {
@@ -272,6 +276,7 @@ export interface EvaluationDetail {
   linkedin_url?: string | null
   portfolio_url?: string | null
   confidence_tiers?: { high: string[]; medium: string[]; low: string[] }
+  tfidf_score?: number | null
 }
 
 export interface ResumeSection {
@@ -597,6 +602,26 @@ export async function getResultDetail(evaluationId: number): Promise<EvaluationD
   const { data } = await apiClient.get<EvaluationDetail>(`/results/${evaluationId}`)
   return data
 }
+
+export interface CompareAnalysisResponse {
+  analysis: string
+  common_skills: string[]
+  only_a: string[]
+  only_b: string[]
+  shared_count: number
+  only_a_count: number
+  only_b_count: number
+  best_pick_name?: string
+  score_diff?: number
+  github_a?: string
+  github_b?: string
+}
+
+export async function getCompareAnalysis(a: number, b: number): Promise<CompareAnalysisResponse> {
+  const { data } = await apiClient.get<CompareAnalysisResponse>('/results/compare-analysis', { params: { a, b } })
+  return data
+}
+
 
 export async function deleteResult(evaluationId: number): Promise<void> {
   await apiClient.delete(`/results/${evaluationId}`)
@@ -937,6 +962,7 @@ export const EMAIL_TEMPLATE_LABELS: Record<string, string> = {
   rejection: 'Rejection',
   coding_invite: 'Coding Assessment Invite',
   interview_invite: 'Technical Interview Invite',
+  github_request: 'Request GitHub Profile',
 }
 
 export async function getEmailTemplates(): Promise<EmailTemplate[]> {
@@ -1326,6 +1352,85 @@ export async function getAuditLog(params: {
 }): Promise<PaginatedAuditLog> {
   const { data } = await apiClient.get<PaginatedAuditLog>('/audit-log', { params })
   return data
+}
+
+// ─── Manual Evaluation ────────────────────────────────────────────────────────
+
+export interface ManualEvaluationPayload {
+  manual_score: number
+  justification?: string | null
+  skills_checklist?: Record<string, boolean> | null
+}
+
+export interface ManualEvaluation {
+  id: number
+  evaluation_id: number
+  recruiter_id: number | null
+  manual_score: number
+  justification: string | null
+  skills_checklist: Record<string, boolean> | null
+  created_at: string
+  updated_at: string | null
+}
+
+export async function postManualEvaluation(
+  evaluationId: number,
+  payload: ManualEvaluationPayload
+): Promise<ManualEvaluation> {
+  const { data } = await apiClient.post<ManualEvaluation>(
+    `/resumes/${evaluationId}/manual-evaluation`,
+    payload
+  )
+  return data
+}
+
+export async function getManualEvaluation(evaluationId: number): Promise<ManualEvaluation> {
+  const { data } = await apiClient.get<ManualEvaluation>(`/resumes/${evaluationId}/manual-evaluation`)
+  return data
+}
+
+// ─── SharePoint Config ────────────────────────────────────────────────────────
+
+export interface SharePointConfig {
+  site_url: string | null
+  list_name: string | null
+  status_column: string
+  enabled: boolean
+}
+
+export async function getSharePointConfig(): Promise<SharePointConfig> {
+  const { data } = await apiClient.get<SharePointConfig>('/admin/sharepoint/config')
+  return data
+}
+
+export async function saveSharePointConfig(config: SharePointConfig): Promise<{ message: string }> {
+  const { data } = await apiClient.post<{ message: string }>('/admin/sharepoint/connect', config)
+  return data
+}
+
+// ─── OneDrive Config ──────────────────────────────────────────────────────────
+
+export interface OneDriveConfig {
+  folder_id: string | null
+  folder_name: string | null
+  poll_interval_minutes: number
+  enabled: boolean
+}
+
+export async function getOneDriveConfig(): Promise<OneDriveConfig> {
+  const { data } = await apiClient.get<OneDriveConfig>('/admin/onedrive/config')
+  return data
+}
+
+export async function saveOneDriveConfig(config: OneDriveConfig): Promise<{ message: string }> {
+  const { data } = await apiClient.post<{ message: string }>('/admin/onedrive/config', config)
+  return data
+}
+
+export function getResumeFileUrl(resumeId: number): string {
+  const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  const token = localStorage.getItem('token') ?? ''
+  return `${baseUrl}/upload/${resumeId}/file?token=${encodeURIComponent(token)}`
 }
 
 export default apiClient

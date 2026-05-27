@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getImapConfig, getInboundEmails, getImapSettings, saveImapSettings, testImapConnection, getGraphSettings, saveGraphSettings, testGraphConnection, getIngestionMethod, setIngestionMethod, triggerGraphFetch, stopGraphFetch, triggerImapFetch, stopImapFetch, deleteInboundEmail, clearInboundEmails, retryInboundEmail } from '../api/client'
+import { getImapConfig, getInboundEmails, getImapSettings, saveImapSettings, testImapConnection, getGraphSettings, saveGraphSettings, testGraphConnection, getIngestionMethod, setIngestionMethod, triggerGraphFetch, stopGraphFetch, triggerImapFetch, stopImapFetch, deleteInboundEmail, clearInboundEmails, retryInboundEmail, getSharePointConfig, saveSharePointConfig, getOneDriveConfig, saveOneDriveConfig } from '../api/client'
 import type { InboundEmailItem, IngestionMethod } from '../api/client'
 import { useAppStore } from '../store/useAppStore'
 
@@ -21,6 +21,171 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 type FilterStatus = '' | 'processed' | 'failed' | 'no_attachment' | 'new' | 'keyword_filtered'
+
+function OneDriveCard() {
+  const { data } = useQuery({ queryKey: ['onedrive-config'], queryFn: getOneDriveConfig, retry: false })
+  const qc = useQueryClient()
+  const [folderId, setFolderId] = useState('')
+  const [folderName, setFolderName] = useState('')
+  const [pollInterval, setPollInterval] = useState(5)
+  const [enabled, setEnabled] = useState(false)
+  const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (data && !loaded) {
+      setFolderId(data.folder_id ?? '')
+      setFolderName(data.folder_name ?? '')
+      setPollInterval(data.poll_interval_minutes || 5)
+      setEnabled(data.enabled)
+      setLoaded(true)
+    }
+  }, [data, loaded])
+
+  const saveMut = useMutation({
+    mutationFn: () => saveOneDriveConfig({
+      folder_id: folderId.trim() || null,
+      folder_name: folderName.trim() || null,
+      poll_interval_minutes: Number(pollInterval) || 5,
+      enabled,
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['onedrive-config'] })
+      setSaveMsg(res.message)
+      setTimeout(() => setSaveMsg(null), 3000)
+    },
+    onError: () => { setSaveMsg('Failed to save'); setTimeout(() => setSaveMsg(null), 3000) },
+  })
+
+  const inputCls = 'w-full border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40'
+
+  return (
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100">OneDrive Folder Config</h2>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+            Auto-poll a OneDrive folder for candidate resumes.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setEnabled((v) => !v)}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${enabled ? 'bg-[#1D9E75]' : 'bg-gray-300 dark:bg-gray-600'}`}
+        >
+          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-4' : 'translate-x-1'}`} />
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="col-span-2">
+          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">OneDrive Folder Path / Name</label>
+          <input className={inputCls} placeholder="e.g. /Recruiting/Resumes" value={folderName} onChange={(e) => setFolderName(e.target.value)} />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Folder ID (Graph Item ID)</label>
+          <input className={inputCls} placeholder="e.g. 01GM..." value={folderId} onChange={(e) => setFolderId(e.target.value)} />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Poll Interval (minutes)</label>
+          <input type="number" min={1} max={60} className={inputCls} value={pollInterval} onChange={(e) => setPollInterval(Number(e.target.value))} />
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => saveMut.mutate()}
+          disabled={saveMut.isPending}
+          className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-colors"
+        >
+          {saveMut.isPending ? 'Saving…' : 'Save Settings'}
+        </button>
+        {saveMsg && <span className="text-xs text-[#1D9E75] font-medium">{saveMsg}</span>}
+        <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">
+          {enabled ? '✓ Auto-polling enabled' : 'Auto-polling disabled'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function SharePointCard() {
+  const { data } = useQuery({ queryKey: ['sharepoint-config'], queryFn: getSharePointConfig, retry: false })
+  const qc = useQueryClient()
+  const [siteUrl, setSiteUrl] = useState('')
+  const [listName, setListName] = useState('')
+  const [statusCol, setStatusCol] = useState('Status')
+  const [enabled, setEnabled] = useState(false)
+  const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (data && !loaded) {
+      setSiteUrl(data.site_url ?? '')
+      setListName(data.list_name ?? '')
+      setStatusCol(data.status_column || 'Status')
+      setEnabled(data.enabled)
+      setLoaded(true)
+    }
+  }, [data, loaded])
+
+  const saveMut = useMutation({
+    mutationFn: () => saveSharePointConfig({ site_url: siteUrl.trim() || null, list_name: listName.trim() || null, status_column: statusCol.trim() || 'Status', enabled }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['sharepoint-config'] })
+      setSaveMsg(res.message)
+      setTimeout(() => setSaveMsg(null), 3000)
+    },
+    onError: () => { setSaveMsg('Failed to save'); setTimeout(() => setSaveMsg(null), 3000) },
+  })
+
+  const inputCls = 'w-full border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40'
+
+  return (
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100">SharePoint List Config</h2>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+            Sync candidate evaluation status back to a SharePoint list column.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setEnabled((v) => !v)}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${enabled ? 'bg-[#1D9E75]' : 'bg-gray-300 dark:bg-gray-600'}`}
+        >
+          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-4' : 'translate-x-1'}`} />
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="col-span-2">
+          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">SharePoint Site URL</label>
+          <input className={inputCls} placeholder="https://contoso.sharepoint.com/sites/Recruiting" value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">List Name</label>
+          <input className={inputCls} placeholder="Candidates" value={listName} onChange={(e) => setListName(e.target.value)} />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Status Column Name</label>
+          <input className={inputCls} placeholder="Status" value={statusCol} onChange={(e) => setStatusCol(e.target.value)} />
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => saveMut.mutate()}
+          disabled={saveMut.isPending}
+          className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-colors"
+        >
+          {saveMut.isPending ? 'Saving…' : 'Save Settings'}
+        </button>
+        {saveMsg && <span className="text-xs text-[#1D9E75] font-medium">{saveMsg}</span>}
+        <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">
+          {enabled ? '✓ Sync enabled' : 'Sync disabled'}
+        </span>
+      </div>
+    </div>
+  )
+}
 
 export default function EmailIngestion() {
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('')
@@ -751,6 +916,16 @@ export default function EmailIngestion() {
             )}
           </div>
         </div>
+      )}
+
+      {/* ── OneDrive Folder Config (admin only) ─────────────────── */}
+      {isAdmin && (
+        <OneDriveCard />
+      )}
+
+      {/* ── SharePoint List Config (admin only) ─────────────────── */}
+      {isAdmin && (
+        <SharePointCard />
       )}
 
       {/* ── Pipeline Status Card ────────────────────────────────── */}
