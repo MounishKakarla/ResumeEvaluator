@@ -17,6 +17,8 @@ services:
         fromDatabase:
           name: resume-eval-db
           property: connectionString
+      - key: APP_URL
+        value: "https://resume-eval-frontend.onrender.com"
       - key: MAX_UPLOAD_MB
         value: "20"
       # IMPORTANT: Add your OpenAI/LLM Keys here securely via Render Dashboard, not in code!

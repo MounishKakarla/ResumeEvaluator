@@ -90,6 +90,7 @@ def list_results(
     query = (
         db.query(Evaluation)
         .join(ResumeVersion, Evaluation.resume_id == ResumeVersion.id)
+        .join(Candidate, ResumeVersion.candidate_id == Candidate.id)
         .options(
             joinedload(Evaluation.resume)
             .joinedload(Resume.version)
