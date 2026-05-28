@@ -305,10 +305,19 @@ export async function reclassifyAndRescore(evaluationId: number): Promise<{ sect
 
 // ─── Axios Instance ──────────────────────────────────────────────────────────
 
-const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-export const API_BASE_URL = rawBaseUrl && !rawBaseUrl.startsWith('http://') && !rawBaseUrl.startsWith('https://') && !rawBaseUrl.startsWith('/')
-  ? `https://${rawBaseUrl}`
-  : rawBaseUrl
+const getBaseUrl = (): string => {
+  const url = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  if (url && !url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('/')) {
+    // If it's a naked Render host name (e.g. resume-eval-backend-x213)
+    if (!url.includes('.')) {
+      return `https://${url}.onrender.com`
+    }
+    return `https://${url}`
+  }
+  return url
+}
+
+export const API_BASE_URL = getBaseUrl()
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
