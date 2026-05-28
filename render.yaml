@@ -27,7 +27,6 @@ services:
   - type: web
     name: resume-eval-frontend
     env: static
-    region: ohio
     plan: free
     rootDir: frontend
     buildCommand: npm install && npm run build
@@ -37,7 +36,7 @@ services:
         fromService:
           type: web
           name: resume-eval-backend
-          property: url
+          property: host
     routes:
       - type: rewrite
         source: /*

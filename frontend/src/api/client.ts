@@ -305,8 +305,13 @@ export async function reclassifyAndRescore(evaluationId: number): Promise<{ sect
 
 // ─── Axios Instance ──────────────────────────────────────────────────────────
 
+const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+export const API_BASE_URL = rawBaseUrl && !rawBaseUrl.startsWith('http://') && !rawBaseUrl.startsWith('https://') && !rawBaseUrl.startsWith('/')
+  ? `https://${rawBaseUrl}`
+  : rawBaseUrl
+
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -1428,7 +1433,7 @@ export async function saveOneDriveConfig(config: OneDriveConfig): Promise<{ mess
 }
 
 export function getResumeFileUrl(resumeId: number): string {
-  const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  const baseUrl = API_BASE_URL
   const token = localStorage.getItem('token') ?? ''
   return `${baseUrl}/upload/${resumeId}/file?token=${encodeURIComponent(token)}`
 }

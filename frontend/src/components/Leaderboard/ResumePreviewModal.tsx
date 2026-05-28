@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { API_BASE_URL } from '../../api/client'
 
 interface ResumePreviewModalProps {
   resumeId: number | null
@@ -41,7 +42,7 @@ export default function ResumePreviewModal({ resumeId, candidateName, onClose }:
     setBlobUrl(null)
     setIsDocx(false)
 
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const baseUrl = API_BASE_URL
     const token = localStorage.getItem('token') ?? ''
     const url = `${baseUrl}/upload/${resumeId}/file?token=${encodeURIComponent(token)}`
 

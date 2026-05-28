@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
 import type { QueuedFile, DetectedSection } from '../store/useAppStore'
-import { uploadResume, getResumes, deleteResume, deleteAllResumes, archiveResume, runEvaluation, getJobRoles, getEvaluationStatus, reparseAllCandidates } from '../api/client'
+import { uploadResume, getResumes, deleteResume, deleteAllResumes, archiveResume, runEvaluation, getJobRoles, getEvaluationStatus, reparseAllCandidates, API_BASE_URL } from '../api/client'
 import type { UploadResponse, JobRole, ParseSettings, EvaluationStatus } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import UploadZone from '../components/UploadZone'
@@ -209,7 +209,7 @@ export default function Upload() {
   }
 
   function subscribeSse(resumeId: number, idx: number) {
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const baseUrl = API_BASE_URL
     const token = localStorage.getItem('token')
     const es = new EventSource(
       `${baseUrl}/upload/${resumeId}/progress?token=${encodeURIComponent(token ?? '')}`
