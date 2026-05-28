@@ -154,7 +154,7 @@ export default function Leaderboard() {
     if (mainEl) {
       mainEl.scrollTop = 0
     }
-  }, [selectedJobRoleId, nameSearch])
+  }, [selectedJobRoleId, nameSearch, filterStatus])
   const {
     data,
     fetchNextPage,
@@ -163,7 +163,7 @@ export default function Leaderboard() {
     isLoading,
     isError,
   } = useInfiniteQuery({
-    queryKey: ['results', selectedJobRoleId, nameSearch],
+    queryKey: ['results', selectedJobRoleId, nameSearch, filterStatus],
     queryFn: ({ pageParam = 1 }) =>
       getResults({
         job_role_id: selectedJobRoleId ?? undefined,
@@ -172,6 +172,7 @@ export default function Leaderboard() {
         limit: PAGE_SIZE,
         page: pageParam as number,
         search: nameSearch.trim() || undefined,
+        status: filterStatus || undefined,
       }),
     getNextPageParam: (lastPage, allPages) => {
       const currentCount = allPages.reduce((sum, p) => sum + p.items.length, 0)

@@ -147,7 +147,23 @@ def list_results(
             .correlate(Evaluation)
             .scalar_subquery()
         )
-        query = query.filter(latest_sl_subq == shortlist_status)
+        if shortlist_status == "rejected":
+            query = query.filter(
+                or_(
+                    latest_sl_subq == "rejected",
+                    Candidate.stage == "rejected",
+                    Evaluation.eval_status.in_(["tfidf_filtered", "experience_filtered"]),
+                )
+            )
+        elif shortlist_status == "review":
+            query = query.filter(
+                or_(
+                    latest_sl_subq == "review",
+                    Candidate.needs_manual_review.is_(True),
+                )
+            )
+        else:
+            query = query.filter(latest_sl_subq == shortlist_status)
 
     # ── DB-level sort (whitelisted column) ────────────────────────────────────
     sort_col = _SORT_COLUMNS.get(sort, Evaluation.total_score)

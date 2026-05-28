@@ -77,20 +77,23 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass
 
-    # Pre-warm embedding model in a background thread.
-    # SentenceTransformer downloads ~90 MB on first run — keeping it off the
-    # lifespan lets /ready respond immediately instead of timing out.
-    import threading
+    # Pre-warm embedding model in a background thread if enabled and not on Render.
+    # SentenceTransformer consumes significant RAM (200MB+ PyTorch + 90MB model)
+    # which easily triggers Out-Of-Memory (OOM) kills on Render's 512MB free tier.
+    if os.environ.get("PREWARM_EMBEDDING", "true").lower() == "true" and not os.environ.get("RENDER"):
+        import threading
 
-    def _warm_embedder() -> None:
-        try:
-            from app.services.embedder import embedder
-            embedder.load(settings.embedding_model)
-            logger.info("Embedding model '%s' ready", settings.embedding_model)
-        except Exception as exc:
-            logger.warning("Embedding model pre-warm failed (will lazy-load on first use): %s", exc)
+        def _warm_embedder() -> None:
+            try:
+                from app.services.embedder import embedder
+                embedder.load(settings.embedding_model)
+                logger.info("Embedding model '%s' ready", settings.embedding_model)
+            except Exception as exc:
+                logger.warning("Embedding model pre-warm failed (will lazy-load on first use): %s", exc)
 
-    threading.Thread(target=_warm_embedder, daemon=True, name="embedder-warmup").start()
+        threading.Thread(target=_warm_embedder, daemon=True, name="embedder-warmup").start()
+    else:
+        logger.info("Embedding model pre-warming skipped to conserve memory")
 
     os.makedirs(settings.upload_dir, exist_ok=True)
 
