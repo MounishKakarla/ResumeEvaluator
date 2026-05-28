@@ -400,7 +400,18 @@ export default function Leaderboard() {
     }
     if (filterStatus) {
       if (filterStatus === 'review') {
-        arr = arr.filter((r) => r.status === 'review' || (r.status === 'pending' && r.filter_stage === 'llm_scored'))
+        // Match: backend returns 'review', OR candidate has needs_manual_review with any unevaluated status
+        arr = arr.filter((r) =>
+          r.status === 'review' ||
+          (r.needs_manual_review && (r.status === 'done' || r.status === 'pending' || !r.status)) ||
+          (r.status === 'pending' && r.filter_stage === 'llm_scored')
+        )
+      } else if (filterStatus === 'rejected') {
+        arr = arr.filter((r) =>
+          r.status === 'rejected' ||
+          r.filter_stage === 'experience_filtered' ||
+          r.filter_stage === 'tfidf_filtered'
+        )
       } else {
         arr = arr.filter((r) => r.status === filterStatus)
       }
@@ -473,7 +484,7 @@ export default function Leaderboard() {
     <div className="p-6 space-y-5 w-full min-w-0 max-w-full overflow-x-hidden">
       {/* Auto-pause intake banner */}
       {selectedRole?.intake_paused && (
-        <div className="flex items-center justify-between bg-[#FAEEDA] border border-[#EF9F27] rounded-xl px-5 py-3">
+        <div className="no-print flex items-center justify-between bg-[#FAEEDA] border border-[#EF9F27] rounded-xl px-5 py-3">
           <div>
             <p className="text-sm font-semibold text-[#633806]">Intake paused — shortlist target reached</p>
             <p className="text-xs text-[#633806]/70 mt-0.5">
@@ -490,26 +501,28 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Summary KPI Cards */}
-      <SummaryCards
-        totalEvaluated={totalEvaluated}
-        avgScore={avgScore}
-        shortlisted={shortlisted}
-        needsReview={needsReview}
-        pendingCount={pendingCount}
-        autoRejected={autoRejected}
-        tfidfFiltered={tfidfFiltered}
-        experienceFiltered={experienceFiltered}
-        queuedCount={queuedCount}
-        summaryFetching={summaryFetching}
-        summary={summary}
-        scoreRangeFilter={scoreRangeFilter}
-        clearScoreFilter={clearScoreFilter}
-      />
+      {/* Summary KPI Cards — hidden during PDF print */}
+      <div className="no-print">
+        <SummaryCards
+          totalEvaluated={totalEvaluated}
+          avgScore={avgScore}
+          shortlisted={shortlisted}
+          needsReview={needsReview}
+          pendingCount={pendingCount}
+          autoRejected={autoRejected}
+          tfidfFiltered={tfidfFiltered}
+          experienceFiltered={experienceFiltered}
+          queuedCount={queuedCount}
+          summaryFetching={summaryFetching}
+          summary={summary}
+          scoreRangeFilter={scoreRangeFilter}
+          clearScoreFilter={clearScoreFilter}
+        />
+      </div>
 
-      {/* Bulk Action Bar */}
+      {/* Bulk Action Bar — hidden during PDF print */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 bg-[#EEEDFE] dark:bg-[#2d2a5a] border border-[#AFA9EC] rounded-xl px-4 py-2.5">
+        <div className="no-print flex items-center gap-3 bg-[#EEEDFE] dark:bg-[#2d2a5a] border border-[#AFA9EC] rounded-xl px-4 py-2.5">
           <span className="text-sm font-semibold text-[#3C3489] dark:text-[#AFA9EC]">
             {selectedIds.size} selected
           </span>
@@ -570,7 +583,8 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Filter and Action Controls */}
+      {/* Filter and Action Controls — hidden during PDF print */}
+      <div className="no-print">
       <FilterControls
         nameSearch={nameSearch}
         setNameSearch={setNameSearch}
@@ -605,6 +619,7 @@ export default function Leaderboard() {
         }}
         items={items}
       />
+      </div>
 
       {/* Candidate Grid Table or Needs Review Buckets */}
       {filterStatus === 'review' ? (
@@ -647,16 +662,18 @@ export default function Leaderboard() {
         />
       )}
 
-      {/* Manual Evaluation Panel */}
-      <ManualEvalPanel
-        item={panelItem}
-        roleSkillNames={selectedRole?.skill_names ?? []}
-        onClose={() => setPanelItem(null)}
-      />
+      {/* Manual Evaluation Panel — hidden during PDF print */}
+      <div className="no-print">
+        <ManualEvalPanel
+          item={panelItem}
+          roleSkillNames={selectedRole?.skill_names ?? []}
+          onClose={() => setPanelItem(null)}
+        />
+      </div>
 
 
-      {/* Pagination Status / Infinite Scroll Indicator */}
-      <div className="flex flex-col items-center justify-center py-4 px-1">
+      {/* Pagination Status / Infinite Scroll Indicator — hidden during PDF print */}
+      <div className="no-print flex flex-col items-center justify-center py-4 px-1">
         {isFetchingNextPage ? (
           <div className="flex items-center gap-2 text-sm text-[#534AB7] dark:text-[#AFA9EC] font-semibold animate-pulse">
             <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">

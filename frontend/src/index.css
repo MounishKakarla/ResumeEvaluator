@@ -11,78 +11,86 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     margin: 8mm;
   }
 
-  /* Hide interactive elements, navigation bar, buttons, dropdowns, and search controls */
-  nav,
-  header,
-  footer,
-  button,
-  input,
-  select,
-  textarea,
-  .no-print,
-  [role="dialog"],
-  .fixed,
-  .absolute,
-  .shadow-xl,
-  .relative {
-    display: none !important;
-  }
-
-  /* Reset layout constraints to allow multi-page scrolling and printing */
-  html, body, #root, .h-screen, main, [class*="h-screen"] {
+  /* ── Reset layout so the full table can flow across pages ── */
+  html, body, #root, main {
     height: auto !important;
     min-height: auto !important;
     overflow: visible !important;
-    position: relative !important;
   }
 
-  main {
-    overflow-y: visible !important;
-    flex: none !important;
-  }
-
-  /* Ensure containers do not crop the print area */
-  .overflow-x-hidden, .overflow-x-auto, .overflow-y-auto {
+  /* Unlock any overflow-clipping containers */
+  div, section, article {
     overflow: visible !important;
     max-height: none !important;
   }
 
-  /* Remove padding for a cleaner printed page */
-  .p-6, .p-5, .space-y-5 {
-    padding: 0 !important;
-    margin: 0 !important;
+  /* ── Hide UI chrome that must NOT appear in print ── */
+  /* Sidebar / navigation */
+  nav,
+  aside,
+  header,
+  footer { display: none !important; }
+
+  /* Buttons, inputs, selects — but NOT table cells or spans */
+  button,
+  input,
+  select,
+  textarea { display: none !important; }
+
+  /* Elements explicitly tagged as no-print */
+  .no-print { display: none !important; }
+
+  /* Fixed/sticky overlays (modals, dropdowns, toasts) */
+  .fixed { display: none !important; }
+
+  /* Sticky table header — reset to static so the table prints naturally */
+  thead, thead tr, thead th {
+    position: static !important;
   }
 
-  /* Clean up the candidate table specifically for printing */
+  /* ── Table layout ── */
   table {
     width: 100% !important;
+    table-layout: fixed !important;
     border-collapse: collapse !important;
-    font-size: 9.5px !important;
-    page-break-inside: auto;
+    font-size: 8.5px !important;
+    page-break-inside: auto !important;
   }
+
+  colgroup, col { display: none !important; }  /* ignore explicit widths */
+
+  thead { display: table-header-group !important; }
 
   tr {
     page-break-inside: avoid !important;
     page-break-after: auto !important;
   }
 
-  thead {
-    display: table-header-group !important;
-  }
-
   th, td {
-    padding: 4px 3px !important;
-    border: 1px solid #e5e7eb !important;
+    padding: 3px 4px !important;
+    border: 1px solid #d1d5db !important;
     word-wrap: break-word !important;
+    overflow: visible !important;
+    white-space: normal !important;
   }
 
   th {
     background-color: #f3f4f6 !important;
-    color: #111 !important;
-    font-weight: 600 !important;
+    color: #111827 !important;
+    font-weight: 700 !important;
   }
 
-  /* Ensure colors and background colors are printed correctly */
+  /* Status badges / skill pills — keep them visible */
+  span {
+    display: inline !important;
+  }
+
+  /* Score colours */
+  .text-\[\#1D9E75\] { color: #1D9E75 !important; }
+  .text-\[\#EF9F27\] { color: #EF9F27 !important; }
+  .text-\[\#E24B4A\] { color: #E24B4A !important; }
+
+  /* ── Colour / background fidelity ── */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;

@@ -352,7 +352,18 @@ export default function CandidateTable({
       </td>
       <td className="px-2 py-2 w-28">
         <StatusBadge
-          status={(item.status === 'pending' ? 'review' : item.status) as Parameters<typeof StatusBadge>[0]['status']}
+          status={(
+            // Auto-rejected at pre-filter stage → always show Rejected
+            item.filter_stage === 'experience_filtered' || item.filter_stage === 'tfidf_filtered'
+              ? 'rejected'
+              // Manual review flag + unevaluated/done → show Needs Review
+              : item.needs_manual_review && (item.status === 'done' || item.status === 'pending' || !item.status)
+                ? 'review'
+                // 'pending' (not yet actioned) → show as Needs Review
+                : item.status === 'pending'
+                  ? 'review'
+                  : item.status
+          ) as Parameters<typeof StatusBadge>[0]['status']}
         />
       </td>
       <td className="px-2 py-2 w-20" onClick={(e) => e.stopPropagation()}>
