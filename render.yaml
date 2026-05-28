@@ -25,6 +25,8 @@ services:
         value: "https://resume-eval-frontend.onrender.com"
       - key: MAX_UPLOAD_MB
         value: "20"
+      - key: IMAP_HOST
+        value: ""
       # IMPORTANT: Add your OpenAI/LLM Keys here securely via Render Dashboard, not in code!
       # - key: LLM_API_KEY
       #   sync: false
