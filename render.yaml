@@ -9,7 +9,7 @@ services:
     buildCommand: |
       pip install -r requirements.txt
       pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.7.1/en_core_web_md-3.7.1-py3-none-any.whl
-    startCommand: sh start.sh
+    startCommand: alembic upgrade head && python seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.0"
