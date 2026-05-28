@@ -57,3 +57,14 @@ databases:
     plan: free
     databaseName: resume_eval
     user: resume_user
+
+  # ── Keep-Alive Cron Job ──
+  # Pings the backend every 14 minutes to prevent Render free-tier sleep (15 min timeout).
+  - type: cron
+    name: resume-eval-keepalive
+    env: python
+    region: ohio
+    plan: free
+    schedule: "*/14 * * * *"
+    buildCommand: "echo 'keep-alive cron ready'"
+    startCommand: "curl -sf https://resume-eval-backend-x213.onrender.com/health || echo 'ping failed'"
