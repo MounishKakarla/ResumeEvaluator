@@ -178,7 +178,7 @@ export default function CandidateTable({
       className={`border-b border-gray-50 dark:border-gray-800 hover:bg-[#EEEDFE]/20 dark:hover:bg-[#2d2a5a]/20 cursor-pointer transition-colors ${selectedIds.has(item.evaluation_id) ? 'bg-[#EEEDFE]/40 dark:bg-[#2d2a5a]/40' : ''}`}
       onClick={() => navigate(`/results/${item.evaluation_id}`)}
     >
-      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+      <td className="px-2 py-2 w-8 no-print" onClick={(e) => e.stopPropagation()}>
         <input
           type="checkbox"
           className="rounded border-gray-300 dark:border-gray-600 accent-[#534AB7]"
@@ -186,17 +186,17 @@ export default function CandidateTable({
           onChange={() => toggleSelect(item.evaluation_id)}
         />
       </td>
-      <td className="px-4 py-3">
+      <td className="px-2 py-2 w-10">
         <RankBadge rank={idx + 1} />
       </td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2.5">
+      <td className="px-2 py-2 w-44">
+        <div className="flex items-center gap-1.5">
           {/* PDF File Icon */}
           {!blindMode && (
             <button
               title="Preview resume PDF"
               onClick={(e) => { e.stopPropagation(); onOpenPreview?.(item.resume_id, displayName(item.candidate_name, item.candidate_email)) }}
-              className="w-6 h-6 flex items-center justify-center rounded text-gray-300 dark:text-gray-600 hover:text-[#534AB7] hover:bg-[#EEEDFE] dark:hover:bg-[#2d2a5a] transition-colors shrink-0"
+              className="w-6 h-6 flex items-center justify-center rounded text-gray-300 dark:text-gray-600 hover:text-[#534AB7] hover:bg-[#EEEDFE] dark:hover:bg-[#2d2a5a] transition-colors shrink-0 no-print"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -264,7 +264,7 @@ export default function CandidateTable({
           </div>
         </div>
       </td>
-      <td className="px-4 py-3 max-w-[160px]">
+      <td className="px-2 py-2 w-28">
         {item.candidate_current_title ? (
           <p className="text-xs text-gray-600 dark:text-gray-300 truncate" title={item.candidate_current_title}>
             {item.candidate_current_title}
@@ -273,7 +273,7 @@ export default function CandidateTable({
           <span className="text-xs text-gray-300 dark:text-gray-600">—</span>
         )}
       </td>
-      <td className="px-4 py-3">
+      <td className="px-2 py-2 w-24">
         <span className="text-xs text-gray-500 dark:text-gray-400">{item.candidate_phone ?? '—'}</span>
       </td>
       <td className="px-4 py-3 w-24">
@@ -327,16 +327,16 @@ export default function CandidateTable({
           </>
         )}
       </td>
-      <td className="px-4 py-3 max-w-[180px]">
+      <td className="px-2 py-2 w-36">
         <div className="flex flex-wrap gap-1">
-          {(item.matched_skill_names ?? []).slice(0, 4).map((s: string) => (
+          {(item.matched_skill_names ?? []).slice(0, 3).map((s: string) => (
             <span key={s} className="text-[10px] font-medium bg-[#EEEDFE] dark:bg-[#2d2a5a] text-[#3C3489] dark:text-[#AFA9EC] px-1.5 py-0.5 rounded-full border border-[#AFA9EC]/60">
               {s}
             </span>
           ))}
-          {(item.matched_skill_names ?? []).length > 4 && (
+          {(item.matched_skill_names ?? []).length > 3 && (
             <span className="text-[10px] text-gray-400 dark:text-gray-500 px-1 py-0.5">
-              +{item.matched_skill_names.length - 4}
+              +{item.matched_skill_names.length - 3}
             </span>
           )}
           {(item.matched_skill_names ?? []).length === 0 && (
@@ -344,29 +344,34 @@ export default function CandidateTable({
           )}
         </div>
       </td>
-      <td className="px-4 py-3">
-        <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">{item.job_role_title}</span>
+      <td className="px-2 py-2 w-24">
+        <span className="text-xs text-gray-700 dark:text-gray-300 font-medium truncate block max-w-[88px]" title={item.job_role_title}>{item.job_role_title}</span>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-2 py-2 w-20">
         <span className="text-xs text-gray-400 dark:text-gray-500">{item.evaluated_at ? formatDate(item.evaluated_at) : '—'}</span>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-2 py-2 w-28">
         <StatusBadge
           status={(item.status === 'pending' ? 'review' : item.status) as Parameters<typeof StatusBadge>[0]['status']}
         />
       </td>
-      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+      <td className="px-2 py-2 w-20" onClick={(e) => e.stopPropagation()}>
         {isAdmin ? (
-          <select
-            value={item.candidate_stage ?? 'applied'}
-            onChange={(e) => stageMut.mutate({ candidateId: item.candidate_id, stage: e.target.value })}
-            className={`text-[10px] font-semibold px-2 py-0.5 rounded border cursor-pointer appearance-none focus:outline-none focus:ring-1 focus:ring-[#534AB7]/40 ${STAGE_COLORS[item.candidate_stage] ?? STAGE_COLORS.applied}`}
-            disabled={stageMut.isPending}
-          >
-            {(Object.keys(STAGE_LABELS)).map((s) => (
-              <option key={s} value={s}>{STAGE_LABELS[s]}</option>
-            ))}
-          </select>
+          <>
+            <select
+              value={item.candidate_stage ?? 'applied'}
+              onChange={(e) => stageMut.mutate({ candidateId: item.candidate_id, stage: e.target.value })}
+              className={`text-[10px] font-semibold px-2 py-0.5 rounded border cursor-pointer appearance-none focus:outline-none focus:ring-1 focus:ring-[#534AB7]/40 ${STAGE_COLORS[item.candidate_stage] ?? STAGE_COLORS.applied} print:hidden`}
+              disabled={stageMut.isPending}
+            >
+              {(Object.keys(STAGE_LABELS)).map((s) => (
+                <option key={s} value={s}>{STAGE_LABELS[s]}</option>
+              ))}
+            </select>
+            <span className={`hidden print:inline-block text-[10px] font-semibold px-2 py-0.5 rounded border ${STAGE_COLORS[item.candidate_stage] ?? STAGE_COLORS.applied}`}>
+              {STAGE_LABELS[item.candidate_stage] ?? 'Applied'}
+            </span>
+          </>
         ) : (
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${STAGE_COLORS[item.candidate_stage] ?? STAGE_COLORS.applied}`}>
             {STAGE_LABELS[item.candidate_stage] ?? 'Applied'}
@@ -374,7 +379,7 @@ export default function CandidateTable({
         )}
       </td>
       {isAdmin && (
-        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+        <td className="px-2 py-2 w-20" onClick={(e) => e.stopPropagation()}>
           {item.email_sent_at ? (
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] text-[#1D9E75] font-semibold">✓ Sent</span>
@@ -399,15 +404,16 @@ export default function CandidateTable({
               <button
                 onClick={() => sendEmailMut.mutate({ evalId: item.evaluation_id, force: false })}
                 disabled={sendEmailMut.isPending}
-                className="text-[10px] font-medium px-2 py-1 rounded border border-[#534AB7] text-[#534AB7] hover:bg-[#EEEDFE] disabled:opacity-50 transition-colors whitespace-nowrap"
+                className="text-[10px] font-medium px-2 py-1 rounded border border-[#534AB7] text-[#534AB7] hover:bg-[#EEEDFE] disabled:opacity-50 transition-colors whitespace-nowrap print:hidden"
                 title="Send next-steps (Coding → Interview → HR) email"
               >
                 {sendEmailMut.isPending && sendEmailMut.variables?.evalId === item.evaluation_id
                   ? 'Sending…'
                   : 'Send Email'}
               </button>
+              <span className="hidden print:inline text-[10px] text-gray-400">Not Sent</span>
               {emailMsg && emailMsg.id === item.evaluation_id && (
-                <span className="text-[10px] text-[#534AB7]">{emailMsg.msg}</span>
+                <span className="text-[10px] text-[#534AB7] print:hidden">{emailMsg.msg}</span>
               )}
             </div>
           ) : (
@@ -415,7 +421,7 @@ export default function CandidateTable({
           )}
         </td>
       )}
-      <td className="px-4 py-3 text-right">
+      <td className="px-2 py-2 w-10 text-right no-print">
         <div className="flex items-center justify-end gap-1">
           {onManualEval && (
             <button
@@ -448,8 +454,8 @@ export default function CandidateTable({
   )
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
-      <div className="overflow-x-auto overflow-y-clip">
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 min-w-0 w-full">
+      <div className="overflow-x-auto overflow-y-clip w-full">
       {isLoading && (
         <table className="w-full text-sm animate-pulse">
           <thead>
@@ -496,7 +502,7 @@ export default function CandidateTable({
         <table ref={tableRef} className="w-full text-sm">
           <thead ref={theadRef} className="sticky top-0 z-10">
             <tr className="bg-gray-50 dark:bg-gray-800">
-              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 px-4 py-3 w-8">
+              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 px-2 py-2.5 w-8 no-print">
                 <input
                   type="checkbox"
                   className="rounded border-gray-300 dark:border-gray-600 accent-[#534AB7]"
@@ -504,37 +510,37 @@ export default function CandidateTable({
                   onChange={toggleSelectAll}
                 />
               </th>
-              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 w-12">Rank</th>
+              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 w-10">Rank</th>
               <th
-                className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer"
+                className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer w-44"
                 onClick={() => toggleSort('candidate_name')}
               >
                 Candidate <SortIcon k="candidate_name" />
               </th>
-              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Current Title</th>
-              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Phone</th>
+              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 w-28">Title</th>
+              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 w-24">Phone</th>
               <th
-                className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer w-24"
+                className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer w-16"
                 onClick={() => toggleSort('total_score')}
               >
                 Score <SortIcon k="total_score" />
               </th>
               <th
-                className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer"
+                className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer w-36"
                 onClick={() => toggleSort('skills_matched')}
               >
                 Skills <SortIcon k="skills_matched" />
               </th>
-              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Applied For</th>
-              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Evaluated At</th>
-              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Status</th>
-              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Stage</th>
+              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 w-24">Applied For</th>
+              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 w-20">Evaluated</th>
+              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 w-28">Status</th>
+              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 w-20">Stage</th>
               {isAdmin && (
-                <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-left px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 w-20">
                   Email
                 </th>
               )}
-              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-right px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 w-12"></th>
+              <th className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 text-right px-2 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 w-10 no-print"></th>
             </tr>
           </thead>
           <tbody>

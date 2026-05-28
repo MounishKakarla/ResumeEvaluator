@@ -423,7 +423,7 @@ def _save_tfidf_filtered(
         .first()
     )
     summary = (
-        f"Stage 1 (TF-IDF) pre-filter: relevance score {tfidf_score:.3f} is below "
+        f"Stage 1 pre-filter: relevance score {int(round(tfidf_score * 100))}% is below "
         f"the configured threshold. LLM evaluation skipped. "
         f"Keyword matches found: {', '.join(matched_keywords) if matched_keywords else 'none'}."
     )

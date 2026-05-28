@@ -470,7 +470,7 @@ export default function Leaderboard() {
   }
 
   return (
-    <div className="p-6 space-y-5 w-full">
+    <div className="p-6 space-y-5 w-full min-w-0 max-w-full overflow-x-hidden">
       {/* Auto-pause intake banner */}
       {selectedRole?.intake_paused && (
         <div className="flex items-center justify-between bg-[#FAEEDA] border border-[#EF9F27] rounded-xl px-5 py-3">

@@ -256,7 +256,13 @@ export default function CandidateDetail() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3">
             <h1 className="font-bold text-gray-900 dark:text-gray-100 text-lg truncate">{data.candidate_name}</h1>
-            <StatusBadge status={data.status as Parameters<typeof StatusBadge>[0]['status']} />
+            <StatusBadge status={(
+              data.shortlist_status === 'shortlisted' ? 'shortlisted'
+              : data.shortlist_status === 'rejected' ? 'rejected'
+              : data.shortlist_status === 'review' ? 'review'
+              : data.status === 'pending' ? 'review'
+              : data.status
+            ) as Parameters<typeof StatusBadge>[0]['status']} />
             {reparseDone ? (
               <span className="text-xs text-[#1D9E75] font-medium">Re-parsed</span>
             ) : (
@@ -481,7 +487,13 @@ export default function CandidateDetail() {
                     <h3 className="font-semibold text-gray-800 dark:text-gray-100">AI Analysis</h3>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#EEEDFE] dark:bg-[#534AB7]/20 text-[#3C3489] dark:text-[#AFA9EC] border border-[#AFA9EC]/40">AI</span>
                   </div>
-                  <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{data.reasoning_summary}</p>
+                  <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                    {data.reasoning_summary
+                      .replace(/\(TF-IDF\)/g, '')
+                      .replace(/\bTF-IDF\b/g, 'keyword relevance')
+                      .replace(/relevance score (\d+\.\d+)/g, (_: string, n: string) => `relevance score ${Math.round(parseFloat(n) * 100)}%`)
+                    }
+                  </p>
                 </div>
               )}
 
@@ -537,9 +549,9 @@ export default function CandidateDetail() {
                     <div key={label}>
                       <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
                         <span>{label}</span>
-                        <span className="font-medium text-gray-700 dark:text-gray-300">{Math.round(score)}%</span>
+                        <span className="font-medium text-gray-700 dark:text-gray-300">{Math.round(score)}</span>
                       </div>
-                      <ScoreBar score={score} />
+                      <ScoreBar score={score} showLabel={false} />
                     </div>
                   ))}
                 </div>
@@ -550,10 +562,10 @@ export default function CandidateDetail() {
                   <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">Keyword Relevance</p>
                   <div>
                     <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      <span>Relevance (TF-IDF)</span>
+                      <span>Keyword Relevance</span>
                       <span className="font-medium text-gray-700 dark:text-gray-300">{Math.round(data.tfidf_score * 100)}%</span>
                     </div>
-                    <ScoreBar score={data.tfidf_score * 100} />
+                    <ScoreBar score={data.tfidf_score * 100} showLabel={false} />
                   </div>
                 </div>
               )}

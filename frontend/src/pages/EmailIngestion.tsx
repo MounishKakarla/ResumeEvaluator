@@ -63,7 +63,7 @@ function OneDriveCard() {
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="font-semibold text-gray-800 dark:text-gray-100">OneDrive Folder Config</h2>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100">OneDrive Sync</h2>
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
             Auto-poll a OneDrive folder for candidate resumes.
           </p>
@@ -143,7 +143,7 @@ function SharePointCard() {
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="font-semibold text-gray-800 dark:text-gray-100">SharePoint List Config</h2>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100">SharePoint Sync</h2>
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
             Sync candidate evaluation status back to a SharePoint list column.
           </p>
@@ -551,7 +551,7 @@ export default function EmailIngestion() {
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="font-semibold text-gray-800 dark:text-gray-100">IMAP Inbox Settings</h2>
+              <h2 className="font-semibold text-gray-800 dark:text-gray-100">IMAP Sync</h2>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                 Configure the inbox that receives candidate resumes. Changes take effect on the next poll cycle.
               </p>
@@ -712,7 +712,7 @@ export default function EmailIngestion() {
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="font-semibold text-gray-800 dark:text-gray-100">Microsoft Graph API Inbox</h2>
+              <h2 className="font-semibold text-gray-800 dark:text-gray-100">Microsoft Graph API Sync</h2>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                 Recommended for Office 365 — uses OAuth2 app auth, no password required.
               </p>

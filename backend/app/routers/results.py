@@ -219,8 +219,12 @@ def list_results(
                 skills_total=skills_total_map.get(ev.job_role_id, 0),
                 project_match_score=ev.project_score / 100.0,
                 project_match_label=project_match_label,
-                status=latest_sl or (
-                    "review" if (cand and cand.needs_manual_review)
+                status=(
+                    "rejected" if (cand and cand.stage == "rejected")
+                    else "hired" if (cand and cand.stage == "hired")
+                    else latest_sl
+                    if latest_sl
+                    else "review" if (cand and cand.needs_manual_review)
                     else "rejected" if ev.eval_status in ("tfidf_filtered", "experience_filtered")
                     else "pending"
                 ),
@@ -420,6 +424,18 @@ def get_result(
         except Exception:
             logger.warning("Failed to parse requirements_breakdown for evaluation %d", evaluation_id)
 
+    # Derive the display status the same way the list endpoint does so the
+    # detail page badge always matches what the leaderboard shows.
+    derived_status: str = (
+        "rejected" if (cand and cand.stage == "rejected")
+        else "hired" if (cand and cand.stage == "hired")
+        else latest_status
+        if latest_status
+        else "review" if (cand and cand.needs_manual_review)
+        else "rejected" if ev.eval_status in ("tfidf_filtered", "experience_filtered")
+        else "pending"
+    )
+
     return EvaluationDetail(
         id=ev.id,
         resume_id=ev.resume_id,
@@ -439,7 +455,7 @@ def get_result(
         excerpts=excerpts,
         resume_text=resume_text,
         resume_sections=resume_sections,
-        status=latest_status,
+        status=derived_status,
         shortlist_status=latest_status,
         notes=latest_note,
         confidence_tiers=confidence_tiers,

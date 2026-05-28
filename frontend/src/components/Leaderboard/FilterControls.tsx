@@ -104,8 +104,11 @@ function IconTrash() {
 }
 
 // PDF export: print page as PDF using window.print with a simplified layout
-function exportPDF() {
-  window.print()
+function exportPDF(callback?: () => void) {
+  if (callback) callback()
+  setTimeout(() => {
+    window.print()
+  }, 150)
 }
 
 // Full report: export as HTML blob
@@ -300,12 +303,12 @@ export default function FilterControls({
 
           {/* Filters Dropdown Panel */}
           {filtersOpen && (
-            <div className="absolute top-[calc(100%+6px)] left-0 z-50 w-[340px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl shadow-gray-200/60 dark:shadow-black/40 p-5 space-y-5 animate-in fade-in slide-in-from-top-1 duration-150">
+            <div className="absolute top-[calc(100%+6px)] left-0 z-50 w-[260px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl shadow-gray-200/60 dark:shadow-black/40 p-3.5 space-y-3.5 animate-in fade-in slide-in-from-top-1 duration-150">
               {/* Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
-                <span className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+              <div className="flex items-center justify-between pb-2.5 border-b border-gray-100 dark:border-gray-800">
+                <span className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
                   <IconFilter />
-                  Active Filters
+                  Filters
                 </span>
                 <div className="flex items-center gap-2">
                   {activeFilterCount > 0 && (
@@ -329,19 +332,19 @@ export default function FilterControls({
               </div>
 
               {/* Status */}
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Status</label>
-                <div className="flex flex-wrap gap-1.5">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Status</label>
+                <div className="flex flex-wrap gap-1">
                   {[
                     { value: '', label: 'All' },
                     { value: 'shortlisted', label: '✓ Shortlisted' },
-                    { value: 'review', label: '⚑ Next Review' },
+                    { value: 'review', label: '⚑ Review' },
                     { value: 'rejected', label: '✕ Rejected' },
                   ].map((opt) => (
                     <button
                       key={opt.value}
                       onClick={() => setFilterStatus(opt.value)}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-all
+                      className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border transition-all
                         ${filterStatus === opt.value
                           ? 'bg-[#534AB7] text-white border-[#534AB7] shadow-sm'
                           : 'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-[#534AB7]/40 hover:text-[#534AB7]'
@@ -354,21 +357,21 @@ export default function FilterControls({
               </div>
 
               {/* Experience Level */}
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Experience Level</label>
-                <div className="flex flex-wrap gap-1.5">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Experience Level</label>
+                <div className="flex flex-wrap gap-1">
                   {[
-                    { value: '', label: 'All Levels' },
+                    { value: '', label: 'All' },
                     { value: 'entry', label: 'Entry' },
                     { value: 'junior', label: 'Junior' },
-                    { value: 'mid', label: 'Mid-level' },
+                    { value: 'mid', label: 'Mid' },
                     { value: 'senior', label: 'Senior' },
-                    { value: 'executive', label: 'Executive' },
+                    { value: 'executive', label: 'Exec' },
                   ].map((opt) => (
                     <button
                       key={opt.value}
                       onClick={() => setFilterLevel(opt.value)}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-all
+                      className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border transition-all
                         ${filterLevel === opt.value
                           ? 'bg-[#534AB7] text-white border-[#534AB7] shadow-sm'
                           : 'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-[#534AB7]/40 hover:text-[#534AB7]'
@@ -381,9 +384,9 @@ export default function FilterControls({
               </div>
 
               {/* Graduation Year Range */}
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Graduation Year</label>
-                <div className="flex items-center gap-2 overflow-hidden">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Graduation Year</label>
+                <div className="flex items-center gap-1.5">
                   <input
                     type="text"
                     inputMode="numeric"
@@ -391,9 +394,9 @@ export default function FilterControls({
                     value={gradYearFrom}
                     onChange={(e) => setGradYearFrom(e.target.value ? Number(e.target.value) : '')}
                     placeholder="From"
-                    className="min-w-0 flex-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
+                    className="min-w-0 flex-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
                   />
-                  <span className="text-xs text-gray-400 shrink-0">—</span>
+                  <span className="text-xs text-gray-400 shrink-0">–</span>
                   <input
                     type="text"
                     inputMode="numeric"
@@ -401,21 +404,18 @@ export default function FilterControls({
                     value={gradYearTo}
                     onChange={(e) => setGradYearTo(e.target.value ? Number(e.target.value) : '')}
                     placeholder="To"
-                    className="min-w-0 flex-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
+                    className="min-w-0 flex-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
                   />
                   {(gradYearFrom !== '' || gradYearTo !== '') && (
-                    <button
-                      onClick={() => { setGradYearFrom(''); setGradYearTo('') }}
-                      className="shrink-0 text-gray-400 hover:text-red-500 text-base leading-none transition-colors px-1"
-                    >×</button>
+                    <button onClick={() => { setGradYearFrom(''); setGradYearTo('') }} className="shrink-0 text-gray-400 hover:text-red-500 text-sm leading-none transition-colors">×</button>
                   )}
                 </div>
               </div>
 
               {/* Score Range */}
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Fit Score Range</label>
-                <div className="flex items-center gap-2 overflow-hidden">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Fit Score Range</label>
+                <div className="flex items-center gap-1.5">
                   <input
                     type="text"
                     inputMode="numeric"
@@ -423,9 +423,9 @@ export default function FilterControls({
                     value={scoreFrom}
                     onChange={(e) => setScoreFrom(e.target.value ? Number(e.target.value) : '')}
                     placeholder="Min"
-                    className="min-w-0 flex-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
+                    className="min-w-0 flex-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
                   />
-                  <span className="text-xs text-gray-400 shrink-0">—</span>
+                  <span className="text-xs text-gray-400 shrink-0">–</span>
                   <input
                     type="text"
                     inputMode="numeric"
@@ -433,13 +433,10 @@ export default function FilterControls({
                     value={scoreTo}
                     onChange={(e) => setScoreTo(e.target.value ? Number(e.target.value) : '')}
                     placeholder="Max"
-                    className="min-w-0 flex-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
+                    className="min-w-0 flex-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40 placeholder-gray-400"
                   />
                   {(scoreFrom !== '' || scoreTo !== '') && (
-                    <button
-                      onClick={() => { setScoreFrom(''); setScoreTo('') }}
-                      className="shrink-0 text-gray-400 hover:text-red-500 text-base leading-none transition-colors px-1"
-                    >×</button>
+                    <button onClick={() => { setScoreFrom(''); setScoreTo('') }} className="shrink-0 text-gray-400 hover:text-red-500 text-sm leading-none transition-colors">×</button>
                   )}
                 </div>
               </div>
@@ -587,7 +584,7 @@ export default function FilterControls({
               </button>
 
               <button
-                onClick={() => { exportPDF(); setExportOpen(false) }}
+                onClick={() => { exportPDF(() => setExportOpen(false)) }}
                 className="flex items-center gap-2.5 w-full px-3 py-2.5 rounded-xl text-sm text-gray-700 dark:text-gray-300 hover:bg-[#FCEBEB] dark:hover:bg-[#3a1515] hover:text-[#791F1F] dark:hover:text-[#E24B4A] transition-colors group"
               >
                 <span className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 group-hover:bg-[#E24B4A]/10 transition-colors text-[#E24B4A]">
