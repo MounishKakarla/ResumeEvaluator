@@ -24,10 +24,9 @@ services:
       #   sync: false
 
   # ── Frontend Service (React SPA) ──
-  - type: web
+  - type: static
     name: resume-eval-frontend
     env: static
-    plan: free
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
