@@ -63,7 +63,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     class Config:
-        env_file = ".env"
+        # Load from local .env (dev) and Render's secret file path (production)
+        env_file = (
+            "/etc/secrets/.env",  # Render secret file location
+            ".env",               # local development
+        )
+        env_file_encoding = "utf-8"
         extra = "ignore"
 
     @field_validator("secret_key")

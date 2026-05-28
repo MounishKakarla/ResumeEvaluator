@@ -29,43 +29,56 @@ def main() -> None:
         # ------------------------------------------------------------------
         # Admin user
         # ------------------------------------------------------------------
-        admin_email = os.environ.get("ADMIN_EMAIL", "")
-        _env_hash = os.environ.get("ADMIN_HASHED_PASSWORD", "")
-        _env_plain = os.environ.get("ADMIN_PASSWORD", "")
+        admin_email = os.environ.get("ADMIN_EMAIL", "").strip()
+        _env_hash = os.environ.get("ADMIN_HASHED_PASSWORD", "").strip()
+        _env_plain = os.environ.get("ADMIN_PASSWORD", "").strip()
 
         if not admin_email:
+            # No admin email set — skip creating a placeholder admin.
+            # The app's lifespan ensure_admin_user() will handle it once env vars are set.
             print(
-                "WARNING: ADMIN_EMAIL is not set. "
-                "Defaulting to admin@company.com — change this before deploying.",
+                "SKIP: ADMIN_EMAIL is not set — skipping admin user creation.\n"
+                "Set ADMIN_EMAIL and ADMIN_PASSWORD environment variables on Render.",
                 file=sys.stderr,
             )
-            admin_email = "admin@company.com"
-
-        if _env_hash:
-            admin_hashed = _env_hash
-        elif _env_plain:
-            admin_hashed = hash_password(_env_plain)
-        else:
+            admin = db.query(User).filter(User.role == "admin").first()
+            if admin is None:
+                print(
+                    "WARNING: No admin user in DB yet. Add ADMIN_EMAIL + ADMIN_PASSWORD "
+                    "env vars on Render and redeploy.",
+                    file=sys.stderr,
+                )
+                db.commit()
+                return
+            # Use whatever admin exists for associating the job role below
+        elif not _env_hash and not _env_plain:
             print(
-                "WARNING: Neither ADMIN_PASSWORD nor ADMIN_HASHED_PASSWORD is set. "
-                "Defaulting to a weak password. Set ADMIN_PASSWORD env var before deploying.",
+                "WARNING: ADMIN_EMAIL is set but no password provided. "
+                "Skipping admin creation — set ADMIN_PASSWORD env var.",
                 file=sys.stderr,
             )
-            admin_hashed = hash_password("changeme123")
-
-        existing_admin = db.query(User).filter(User.email == admin_email).first()
-        if existing_admin is None:
-            admin = User(
-                email=admin_email,
-                hashed_password=admin_hashed,
-                role="admin",
-            )
-            db.add(admin)
-            db.flush()
-            print(f"Created admin user: {admin_email}")
+            admin = db.query(User).filter(User.email == admin_email).first()
+            if admin is None:
+                db.commit()
+                return
         else:
-            admin = existing_admin
-            print(f"Admin user already exists: {admin_email}")
+            # Both email and password are set — create or sync the admin
+            admin_hashed = _env_hash if _env_hash else hash_password(_env_plain)
+            existing_admin = db.query(User).filter(User.email == admin_email).first()
+            if existing_admin is None:
+                admin = User(
+                    email=admin_email,
+                    hashed_password=admin_hashed,
+                    role="admin",
+                )
+                db.add(admin)
+                db.flush()
+                print(f"Created admin user: {admin_email}")
+            else:
+                # Sync password in case it changed in env vars
+                existing_admin.hashed_password = admin_hashed
+                admin = existing_admin
+                print(f"Admin user already exists (password synced): {admin_email}")
 
         # ------------------------------------------------------------------
         # Skills  (no embeddings needed — scorer uses TF-IDF on the fly)
