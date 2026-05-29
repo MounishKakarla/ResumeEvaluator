@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getSkills,
@@ -14,9 +15,10 @@ import {
   extractSkillsFromJd,
   getSystemStatus,
   testSmtpConnection,
+  runEvaluation,
+  getEvaluationStatus,
 } from '../api/client'
-import type { JobRole, JobRoleRequirement, Skill } from '../api/client'
-import EmailTemplatesPanel from '../components/Configure/EmailTemplatesPanel'
+import type { JobRole, JobRoleRequirement, Skill, EvaluationStatus } from '../api/client'
 import { useAppStore } from '../store/useAppStore'
 import SkillTag from '../components/SkillTag'
 
@@ -57,6 +59,7 @@ function SmtpTestButton() {
 }
 
 export default function Configure() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { selectedJobRoleId, setJobRole } = useAppStore()
 
@@ -127,9 +130,35 @@ export default function Configure() {
     staleTime: 60_000,
   })
 
-  const role = useAppStore((s) => s.role)
-  const isAdmin = role === 'admin'
 
+  // ── Run Evaluation state ──────────────────────────────────────────────────
+  const [evalRoleId, setEvalRoleId] = useState<number | ''>('')
+  const [evalMsg, setEvalMsg] = useState<string | null>(null)
+  const [evalJobRoleId, setEvalJobRoleId] = useState<number | null>(null)
+
+  const { data: evalStatus } = useQuery<EvaluationStatus>({
+    queryKey: ['evalStatus', evalJobRoleId],
+    queryFn: () => getEvaluationStatus(evalJobRoleId!),
+    enabled: evalJobRoleId != null,
+    refetchInterval: (query) => query.state.data?.in_progress ? 3000 : false,
+  })
+
+  const runEvalMut = useMutation({
+    mutationFn: () => runEvaluation(Number(evalRoleId)),
+    onSuccess: (data) => {
+      if (data.queued_count === 0) {
+        setEvalMsg('No resumes matched the job role filters. Check experience level / min years settings.')
+        return
+      }
+      setEvalJobRoleId(Number(evalRoleId))
+      queryClient.invalidateQueries({ queryKey: ['results'] })
+      // Auto-redirect to Leaderboard
+      navigate('/leaderboard')
+    },
+    onError: () => {
+      setEvalMsg('Failed to start evaluation. Check backend logs.')
+    },
+  })
 
   const [rolesInitialized, setRolesInitialized] = useState(false)
   useEffect(() => {
@@ -1264,8 +1293,71 @@ export default function Configure() {
           </div>
         </div>
 
-        {/* Email Templates — admin only */}
-        {isAdmin && <EmailTemplatesPanel />}
+        {/* ── Run Evaluation ───────────────────────────────────────────── */}
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-3">Run Evaluation</h2>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
+            Score all uploaded resumes against this job role. You will be redirected to the Leaderboard automatically.
+          </p>
+          <div className="flex gap-2">
+            <select
+              className="flex-1 border border-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#534AB7]/40"
+              value={evalRoleId}
+              onChange={(e) => { setEvalRoleId(e.target.value ? Number(e.target.value) : ''); setEvalMsg(null) }}
+            >
+              <option value="">Select a job role…</option>
+              {(jobRoles as JobRole[]).map((r) => (
+                <option key={r.id} value={r.id}>{r.title}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => { setEvalMsg(null); runEvalMut.mutate() }}
+              disabled={runEvalMut.isPending || !evalRoleId}
+              className="bg-[#534AB7] hover:bg-[#3C3489] disabled:opacity-50 text-white font-semibold rounded-lg px-4 py-2 text-sm transition-colors shrink-0"
+            >
+              {runEvalMut.isPending ? 'Queuing…' : 'Run Evaluation'}
+            </button>
+          </div>
+          {evalMsg && (
+            <p className="text-xs text-[#791F1F] mt-2">{evalMsg}</p>
+          )}
+          {evalStatus && (
+            <div className="mt-3 space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                <span>
+                  {evalStatus.in_progress
+                    ? <span className="text-[#534AB7] font-medium animate-pulse">Evaluating…</span>
+                    : <span className="text-[#1D9E75] font-medium">Evaluation complete</span>}
+                </span>
+                <span>{evalStatus.scored}/{evalStatus.total} scored</span>
+              </div>
+              <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-1.5 rounded-full transition-all duration-500"
+                  style={{
+                    width: evalStatus.total > 0 ? `${Math.round((evalStatus.scored / evalStatus.total) * 100)}%` : '0%',
+                    backgroundColor: evalStatus.in_progress ? '#534AB7' : '#1D9E75',
+                  }}
+                />
+              </div>
+              <div className="flex gap-3 text-[10px] text-gray-400">
+                {evalStatus.queued > 0 && <span>{evalStatus.queued} queued</span>}
+                {evalStatus.filtered > 0 && <span>{evalStatus.filtered} filtered</span>}
+                {evalStatus.error > 0 && <span className="text-red-400">{evalStatus.error} error{evalStatus.error !== 1 ? 's' : ''}</span>}
+                {!evalStatus.in_progress && (
+                  <button
+                    onClick={() => navigate('/leaderboard')}
+                    className="ml-auto text-[#534AB7] hover:underline font-medium"
+                  >
+                    View results →
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Email Templates moved to Uploads & Email Templates page */}
 
       </div>
     </div>

@@ -110,30 +110,39 @@ def _subject_passes_filter(subject: str, keywords: list[str]) -> bool:
     return any(kw.lower() in subject_lower for kw in keywords)
 
 
-def _fetch_unseen_message_ids(
+def _fetch_unseen_message_ids_with_dates(
     conn: imaplib.IMAP4,
     folder: str = "INBOX",
     subject_keywords: Optional[list[str]] = None,
+    from_date: str = "",
+    to_date: str = "",
+    tz_offset_minutes: int = 0,
 ) -> list[bytes]:
-    """Return IMAP sequence numbers for unread, application-like emails.
-
-    Strategy:
-    1. SELECT the configured folder (default INBOX).
-    2. Search for UNSEEN messages.
-    3. For each candidate, fetch Subject header only (cheap BODY.PEEK).
-    4. Discard messages whose subject doesn't match any configured keyword.
-
-    This avoids downloading full message bodies for unrelated emails (newsletters,
-    meeting invites, etc.) while still marking them as processed only when we
-    actually handle them.
-    """
+    """Return IMAP sequence numbers for unread, application-like emails, optionally filtered by date range."""
     try:
         conn.select(folder)
     except imaplib.IMAP4.error:
         logger.warning("IMAP folder %r not found, falling back to INBOX", folder)
         conn.select("INBOX")
 
-    _, data = conn.search(None, "UNSEEN")
+    search_criteria = ["UNSEEN"]
+    if from_date:
+        try:
+            dt = datetime.strptime(from_date, "%Y-%m-%d")
+            search_criteria.append(f"SINCE {dt.strftime('%d-%b-%Y')}")
+        except Exception as e:
+            logger.error("Failed to parse IMAP from_date %s: %s", from_date, e)
+    if to_date:
+        try:
+            from datetime import timedelta
+            to_dt = datetime.strptime(to_date, "%Y-%m-%d") + timedelta(days=1)
+            search_criteria.append(f"BEFORE {to_dt.strftime('%d-%b-%Y')}")
+        except Exception as e:
+            logger.error("Failed to parse IMAP to_date %s: %s", to_date, e)
+
+    search_query = " ".join(search_criteria)
+    logger.debug("IMAP search query: %s", search_query)
+    _, data = conn.search(None, search_query)
     if not data or not data[0]:
         return []
 
@@ -166,6 +175,17 @@ def _fetch_unseen_message_ids(
             accepted.append(mid)   # on error, include to avoid silent drops
 
     return accepted
+
+
+def _fetch_unseen_message_ids(
+    conn: imaplib.IMAP4,
+    folder: str = "INBOX",
+    subject_keywords: Optional[list[str]] = None,
+) -> list[bytes]:
+    """Backward compatible wrapper for _fetch_unseen_message_ids_with_dates."""
+    return _fetch_unseen_message_ids_with_dates(
+        conn, folder=folder, subject_keywords=subject_keywords
+    )
 
 
 def _fetch_message(conn: imaplib.IMAP4, msg_id: bytes) -> Optional[Message]:
@@ -356,6 +376,9 @@ def _get_imap_config(db_session_factory) -> Optional[dict]:
     keywords = settings.imap_subject_keywords or ""
     method = "auto"
     graph_configured = False
+    fetch_from_date = ""
+    fetch_to_date = ""
+    tz_offset_minutes = 0
 
     try:
         db = db_session_factory()
@@ -378,6 +401,9 @@ def _get_imap_config(db_session_factory) -> Optional[dict]:
             folder = rows.get("imap_folder") or folder
             if "imap_subject_keywords" in rows:
                 keywords = rows["imap_subject_keywords"] or ""
+            fetch_from_date = rows.get("imap_fetch_from_date") or ""
+            fetch_to_date = rows.get("imap_fetch_to_date") or ""
+            tz_offset_minutes = int(rows.get("imap_tz_offset_minutes") or "0")
         finally:
             db.close()
     except Exception as exc:
@@ -402,6 +428,9 @@ def _get_imap_config(db_session_factory) -> Optional[dict]:
         "use_ssl": use_ssl,
         "folder": folder,
         "subject_keywords": kw_list,
+        "fetch_from_date": fetch_from_date,
+        "fetch_to_date": fetch_to_date,
+        "tz_offset_minutes": tz_offset_minutes,
     }
 
 
@@ -445,7 +474,14 @@ def _ingestion_loop(upload_dir: str, poll_interval: int, db_session_factory) -> 
                     cfg["host"], cfg["username"], cfg["folder"],
                 )
                 conn = _connect_imap(cfg["host"], cfg["port"], cfg["username"], cfg["password"], cfg["use_ssl"])
-                msg_ids = _fetch_unseen_message_ids(conn, folder=cfg["folder"], subject_keywords=cfg["subject_keywords"])
+                msg_ids = _fetch_unseen_message_ids_with_dates(
+                    conn,
+                    folder=cfg["folder"],
+                    subject_keywords=cfg["subject_keywords"],
+                    from_date=cfg.get("fetch_from_date", ""),
+                    to_date=cfg.get("fetch_to_date", ""),
+                    tz_offset_minutes=cfg.get("tz_offset_minutes", 0),
+                )
                 logger.debug("Found %d candidate email(s) to process", len(msg_ids))
                 for mid in msg_ids:
                     if _stop_event.is_set():

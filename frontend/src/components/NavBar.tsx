@@ -6,15 +6,13 @@ import { changePassword } from '../api/client'
 import LogoDark from '../assets/Tektalis_Logo_Dark.svg'
 import LogoWhite from '../assets/Tektalis_Logo_White.svg'
 
-const navItems = [
-  { label: 'Job Roles', path: '/configure' },
-  { label: 'Resume Intake', path: '/upload' },
-  { label: 'Leaderboard', path: '/leaderboard' },
-]
-const adminNavItems = [
-  { label: 'Email Config', path: '/email-ingestion' },
-  { label: 'Audit Logs', path: '/audit' },
-  { label: 'Users', path: '/users' },
+const allNavItems = [
+  { label: 'Job Roles', path: '/configure', adminOnly: false },
+  { label: 'Email Config', path: '/email-ingestion', adminOnly: true },
+  { label: 'Leaderboard', path: '/leaderboard', adminOnly: false },
+  { label: 'Uploads & Email Templates', path: '/upload', adminOnly: false },
+  { label: 'Audit Logs', path: '/audit', adminOnly: true },
+  { label: 'Users', path: '/users', adminOnly: true },
 ]
 
 function EyeOn() {
@@ -119,7 +117,7 @@ export default function NavBar() {
 
         {/* Nav tabs */}
         <div className="flex items-center gap-1 flex-1">
-          {[...navItems, ...(role === 'admin' ? adminNavItems : [])].map((item) => (
+          {allNavItems.filter((item) => !item.adminOnly || role === 'admin').map((item) => (
             <NavLink
               key={item.path}
               to={item.path}

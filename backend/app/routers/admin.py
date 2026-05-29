@@ -209,6 +209,8 @@ class ImapSettingsRequest(BaseModel):
     imap_ssl: bool = True
     imap_folder: str = "INBOX"
     imap_subject_keywords: str = ""
+    imap_fetch_from_date: str = ""
+    imap_fetch_to_date: str = ""
 
 
 @router.get("/imap-settings")
@@ -234,6 +236,8 @@ def get_imap_settings(
     ssl_raw = _get("imap_ssl", "true" if settings.imap_ssl else "false")
     folder = _get("imap_folder", settings.imap_folder or "INBOX")
     keywords = _get("imap_subject_keywords", settings.imap_subject_keywords or "")
+    fetch_from_date = _get("imap_fetch_from_date", "")
+    fetch_to_date = _get("imap_fetch_to_date", "")
 
     return {
         "imap_host": host,
@@ -243,6 +247,8 @@ def get_imap_settings(
         "imap_ssl": ssl_raw.lower() == "true",
         "imap_folder": folder,
         "imap_subject_keywords": keywords,
+        "imap_fetch_from_date": fetch_from_date,
+        "imap_fetch_to_date": fetch_to_date,
         "configured": bool(host and username and has_password),
     }
 
@@ -275,6 +281,8 @@ def save_imap_settings(
     _upsert("imap_ssl", "true" if req.imap_ssl else "false")
     _upsert("imap_folder", req.imap_folder.strip() or "INBOX")
     _upsert("imap_subject_keywords", req.imap_subject_keywords)
+    _upsert("imap_fetch_from_date", req.imap_fetch_from_date.strip())
+    _upsert("imap_fetch_to_date", req.imap_fetch_to_date.strip())
     record_audit(db, current_user.id, "imap_settings_updated", "system", None,
                  {"host": req.imap_host, "username": req.imap_username})
     db.commit()
@@ -564,9 +572,11 @@ def stop_graph_fetch(current_user: User = Depends(get_current_user)) -> dict:
 
 @router.post("/trigger-imap-fetch")
 def trigger_imap_fetch(
+    req: Optional[TriggerFetchRequest] = Body(default=None),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Trigger an immediate one-shot IMAP fetch in the background."""
+    """Trigger an immediate one-shot IMAP fetch in the background with optional date limits."""
     _require_admin(current_user)
     import threading
     from app.config import settings as _settings
@@ -574,23 +584,52 @@ def trigger_imap_fetch(
     from app.services.email_ingestion import (
         _get_imap_config,
         _connect_imap,
-        _fetch_unseen_message_ids,
         _fetch_message,
         _process_message_with_retry,
         _stop_event as _imap_stop_event,
+        _fetch_unseen_message_ids_with_dates,
     )
+
+    # Capture body values before thread starts
+    body_from = req.from_date if req else ""
+    body_to = req.to_date if req else ""
+    body_tz_offset = req.tz_offset_minutes if req else 0
+
+    # Persist tz_offset and mark ingestion active so UI updates
+    from app.models import SystemSetting
+    _now = datetime.now(timezone.utc)
+
+    def _upsert_setting(key: str, value: str) -> None:
+        row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = _now
+        else:
+            db.add(SystemSetting(key=key, value=value, updated_at=_now))
+
+    _upsert_setting("imap_tz_offset_minutes", str(body_tz_offset))
+    _upsert_setting("email_ingestion_method", "auto")
+    db.commit()
 
     def _run() -> None:
         _imap_stop_event.clear()
         cfg = _get_imap_config(SessionLocal)
         if not cfg:
             return
+        # Request body dates take priority over DB-saved dates
+        from_date = body_from or cfg.get("fetch_from_date", "")
+        to_date = body_to or cfg.get("fetch_to_date", "")
         try:
             conn = _connect_imap(
                 cfg["host"], cfg["port"], cfg["username"], cfg["password"], cfg["use_ssl"]
             )
-            msg_ids = _fetch_unseen_message_ids(
-                conn, folder=cfg["folder"], subject_keywords=cfg["subject_keywords"]
+            msg_ids = _fetch_unseen_message_ids_with_dates(
+                conn,
+                folder=cfg["folder"],
+                subject_keywords=cfg["subject_keywords"],
+                from_date=from_date,
+                to_date=to_date,
+                tz_offset_minutes=body_tz_offset,
             )
             for mid in msg_ids:
                 if _imap_stop_event.is_set():
@@ -606,6 +645,25 @@ def trigger_imap_fetch(
         except Exception as exc:
             import logging as _logging
             _logging.getLogger(__name__).error("Manual IMAP trigger error: %s", exc)
+        finally:
+            # Auto-disable ingestion after fetch completes
+            try:
+                _db = SessionLocal()
+                try:
+                    from app.models import SystemSetting as _SS
+                    _now2 = datetime.now(timezone.utc)
+                    _row = _db.query(_SS).filter(_SS.key == "email_ingestion_method").first()
+                    if _row:
+                        _row.value = "disabled"
+                        _row.updated_at = _now2
+                    else:
+                        _db.add(_SS(key="email_ingestion_method", value="disabled", updated_at=_now2))
+                    _db.commit()
+                finally:
+                    _db.close()
+            except Exception as _exc:
+                import logging as _logging2
+                _logging2.getLogger(__name__).error("Could not auto-disable ingestion: %s", _exc)
 
     threading.Thread(target=_run, daemon=True, name="imap-manual-trigger").start()
     return {"message": "IMAP fetch triggered in background. Check the email log in a moment."}

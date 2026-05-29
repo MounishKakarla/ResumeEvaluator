@@ -203,6 +203,8 @@ export default function EmailIngestion() {
   const [imapSsl, setImapSsl] = useState(true)
   const [imapFolder, setImapFolder] = useState('INBOX')
   const [imapKeywords, setImapKeywords] = useState('')
+  const [imapFromDate, setImapFromDate] = useState('')
+  const [imapToDate, setImapToDate] = useState('')
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string; error?: string } | null>(null)
@@ -233,6 +235,8 @@ export default function EmailIngestion() {
       setImapSsl(imapSettings.imap_ssl)
       setImapFolder(imapSettings.imap_folder)
       setImapKeywords(imapSettings.imap_subject_keywords)
+      setImapFromDate(imapSettings.imap_fetch_from_date || '')
+      setImapToDate(imapSettings.imap_fetch_to_date || '')
       setSettingsLoaded(true)
     }
   }, [imapSettings, settingsLoaded])
@@ -246,6 +250,8 @@ export default function EmailIngestion() {
       imap_ssl: imapSsl,
       imap_folder: imapFolder.trim() || 'INBOX',
       imap_subject_keywords: imapKeywords,
+      imap_fetch_from_date: imapFromDate,
+      imap_fetch_to_date: imapToDate,
     }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['imapSettings'] })
@@ -278,7 +284,7 @@ export default function EmailIngestion() {
     setImapFetchMsg(null)
     setImapStopMsg(null)
     try {
-      const res = await triggerImapFetch()
+      const res = await triggerImapFetch(imapFromDate || undefined, imapToDate || undefined)
       setImapFetchMsg(res.message)
       setImapActive(true)
       try {
@@ -405,6 +411,19 @@ export default function EmailIngestion() {
     } finally {
       setGraphTesting(false)
     }
+  }
+
+  function applyImapDatePreset(days: number | null) {
+    if (days === null) {
+      setImapFromDate('')
+      setImapToDate('')
+      return
+    }
+    const today = new Date()
+    const from = new Date(today)
+    from.setDate(today.getDate() - days)
+    setImapFromDate(from.toISOString().slice(0, 10))
+    setImapToDate(today.toISOString().slice(0, 10))
   }
 
   function applyDatePreset(days: number | null) {
@@ -646,6 +665,43 @@ export default function EmailIngestion() {
               value={imapKeywords}
               onChange={(e) => setImapKeywords(e.target.value)}
             />
+          </div>
+
+          {/* Date range filter */}
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Fetch Date Range</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500">(leave blank to fetch all)</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              {[
+                { label: 'Last 7 days', days: 7 },
+                { label: 'Last 14 days', days: 14 },
+                { label: 'Last 30 days', days: 30 },
+                { label: 'All', days: null },
+              ].map(({ label, days }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => applyImapDatePreset(days)}
+                  className="text-xs px-3 py-1 rounded-full border border-[#534AB7]/40 text-[#534AB7] dark:text-[#AFA9EC] hover:bg-[#EEEDFE] dark:hover:bg-[#2d2a5a] transition-colors"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">From date</label>
+                <input type="date" className={inputCls}
+                  value={imapFromDate} onChange={(e) => setImapFromDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">To date</label>
+                <input type="date" className={inputCls}
+                  value={imapToDate} onChange={(e) => setImapToDate(e.target.value)} />
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">

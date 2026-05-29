@@ -1035,6 +1035,8 @@ export interface ImapSettings {
   imap_ssl: boolean
   imap_folder: string
   imap_subject_keywords: string
+  imap_fetch_from_date: string
+  imap_fetch_to_date: string
   configured: boolean
 }
 
@@ -1051,6 +1053,8 @@ export async function saveImapSettings(payload: {
   imap_ssl: boolean
   imap_folder: string
   imap_subject_keywords: string
+  imap_fetch_from_date: string
+  imap_fetch_to_date: string
 }): Promise<{ message: string }> {
   const { data } = await apiClient.post<{ message: string }>('/admin/imap-settings', payload)
   return data
@@ -1118,8 +1122,12 @@ export async function stopGraphFetch(): Promise<{ message: string }> {
   return data
 }
 
-export async function triggerImapFetch(): Promise<{ message: string }> {
-  const { data } = await apiClient.post<{ message: string }>('/admin/trigger-imap-fetch')
+export async function triggerImapFetch(fromDate?: string, toDate?: string): Promise<{ message: string }> {
+  const { data } = await apiClient.post<{ message: string }>('/admin/trigger-imap-fetch', {
+    from_date: fromDate ?? '',
+    to_date: toDate ?? '',
+    tz_offset_minutes: new Date().getTimezoneOffset(),
+  })
   return data
 }
 
